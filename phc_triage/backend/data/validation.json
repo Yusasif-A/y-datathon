@@ -1,0 +1,90 @@
+{
+  "note": "All numbers below are from SYNTHETIC data (the simulator), labelled as such for the demo.",
+  "train_world": {
+    "seed": 1,
+    "link_strength": "medium"
+  },
+  "stress_world": {
+    "seed": 7,
+    "link_strength": "weak"
+  },
+  "k_evaluated": 210,
+  "model_precision_recall_at_k": {
+    "k": 210,
+    "precision": 0.71,
+    "recall": 0.345
+  },
+  "baseline_precision_recall_at_k": {
+    "k": 210,
+    "precision": 0.39,
+    "recall": 0.19
+  },
+  "beats_baseline": true,
+  "calibration": [
+    {
+      "bucket": "(0.0407, 0.145]",
+      "predicted_mean": 0.122,
+      "actual_rate": 0.129,
+      "n": 280
+    },
+    {
+      "bucket": "(0.145, 0.174]",
+      "predicted_mean": 0.158,
+      "actual_rate": 0.206,
+      "n": 282
+    },
+    {
+      "bucket": "(0.174, 0.209]",
+      "predicted_mean": 0.19,
+      "actual_rate": 0.246,
+      "n": 280
+    },
+    {
+      "bucket": "(0.209, 0.267]",
+      "predicted_mean": 0.236,
+      "actual_rate": 0.325,
+      "n": 286
+    },
+    {
+      "bucket": "(0.267, 0.775]",
+      "predicted_mean": 0.413,
+      "actual_rate": 0.647,
+      "n": 272
+    }
+  ],
+  "brier_score": 0.1907,
+  "fairness_rural_vs_urban": {
+    "rural": {
+      "k": 148,
+      "precision": 0.608,
+      "recall": 0.319
+    },
+    "urban": {
+      "k": 61,
+      "precision": 0.836,
+      "recall": 0.34
+    }
+  },
+  "stress_test": {
+    "model_precision_recall_at_k": {
+      "k": 690,
+      "precision": 0.529,
+      "recall": 0.307
+    },
+    "baseline_precision_recall_at_k": {
+      "k": 690,
+      "precision": 0.33,
+      "recall": 0.192
+    },
+    "beats_baseline": true
+  },
+  "detection_lag_months_vs_baseline": 0.92,
+  "silence_cause_label_counts": {
+    "none": 3209,
+    "chronic_poor_reporter": 792,
+    "late_entry": 558,
+    "sudden_drop": 175,
+    "lga_wide": 50,
+    "insecure_silence": 16
+  }
+}

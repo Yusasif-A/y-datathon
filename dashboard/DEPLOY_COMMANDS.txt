@@ -1,0 +1,18 @@
+# ComNote dashboard — Firebase deploy commands
+# Copy and paste these one by one.
+
+# 1. Go to the dashboard folder
+cd c:\Users\USER\Music\comguard\whatsapp_chatbot\dashboard
+
+# 2. FIRST TIME ONLY: open static\js\config.js and set API_URL to your backend,
+#    e.g. https://comnote-api.yourdomain.ng   (no trailing slash)
+
+# 3. Switch to the com-note Firebase project
+firebase use com-note
+
+# 4. Deploy to Firebase Hosting
+firebase deploy --only hosting
+
+# Live at:
+#   Public portal   https://com-note.web.app
+#   Officer console https://com-note.web.app/admin

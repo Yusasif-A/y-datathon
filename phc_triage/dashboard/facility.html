@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHC Triage — Facility</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header class="topbar no-print" id="topbar"></header>
+<main class="shell">
+  <p class="no-print"><a class="btn sm ghost" href="javascript:history.back()">← Back to list</a></p>
+  <div class="page-head">
+    <div class="title-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <h1 id="f-name" style="margin:0">Loading…</h1>
+      <span class="tag" id="f-tag"></span>
+    </div>
+    <p class="sub" id="f-meta"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Reporting history <span class="faint">— bars = reports received, dashed line = expected level</span></h2>
+    <div class="chart-box"><canvas id="chart-reports"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Why it is flagged</h2>
+    <div class="bars" id="reason-bars"></div>
+  </div>
+
+  <div class="tiles-row" id="tiles"></div>
+
+  <div class="panel">
+    <h2>Silence type</h2>
+    <p id="silence-type" class="mono"></p>
+    <h2 style="margin-top:14px">Suggested action</h2>
+    <p id="action"></p>
+    <div class="btns no-print" id="btns" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+  </div>
+
+  <div class="panel no-print">
+    <h2>WhatsApp to the facility <span class="faint">— mock-up: sent only after you review it here, never automatic</span></h2>
+    <div id="wa-btns" style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn sm" data-kind="reminder">Send report reminder</button>
+      <button class="btn sm" data-kind="confirmation">Send fridge check (YES/NO)</button>
+    </div>
+  </div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/static/js/config.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const fid = new URLSearchParams(location.search).get("id");
+
+async function boot() {
+  PT.topbar("officer");
+  if (!fid) { $("#f-name").textContent = "No facility id given"; return; }
+  let d;
+  try { d = await PT.api(`/api/facility/${encodeURIComponent(fid)}`); }
+  catch (e) { $("#f-name").textContent = "Could not load"; PT.toast(e.message); return; }
+
+  document.title = `${d.name} — PHC Triage`;
+  $("#f-name").textContent = d.name;
+  $("#f-tag").textContent = d.tag; $("#f-tag").className = `tag ${d.tag}`;
+  $("#f-meta").textContent = `${d.type} · ${d.lga}, ${d.state} · ${d.people_served_label} people served · Sample data`;
+
+  const months = d.reporting_chart.map((r) => r.month);
+  const values = d.reporting_chart.map((r) => (r.reported ? r.service_total : null));
+  const expected = months.map(() => d.expected_level);
+  new Chart($("#chart-reports"), {
+    data: {
+      labels: months,
+      datasets: [
+        { type: "bar", label: "Reported service volume", data: values, backgroundColor: "#0b6b4799", borderRadius: 2 },
+        { type: "line", label: "Expected level", data: expected, borderDash: [5, 4], borderColor: "#b42318", pointRadius: 0, borderWidth: 2 },
+      ],
+    },
+    options: { maintainAspectRatio: false, animation: false,
+      plugins: { legend: { position: "bottom" } },
+      scales: { x: { ticks: { maxRotation: 0, autoSkipPadding: 12 } }, y: { beginAtZero: true } } },
+  });
+
+  const maxAbs = Math.max(1, ...d.reason_breakdown.map((r) => Math.abs(r.impact)));
+  $("#reason-bars").innerHTML = d.reason_breakdown.map((r) => {
+    const pct = Math.round((Math.abs(r.impact) / maxAbs) * 100);
+    const color = r.impact >= 0 ? "#b42318" : "#1d7a4c";
+    return `<div class="bar-row"><span>${PT.esc(r.group)}</span>
+      <span class="bar-track"><span style="width:${pct}%;background:${color}"></span></span>
+      <span class="mono faint">${r.impact >= 0 ? "+" : ""}${r.impact.toFixed(2)}</span></div>`;
+  }).join("") || `<p class="faint">No strong signals either way.</p>`;
+
+  const t = d.tiles;
+  $("#tiles").innerHTML = `
+    <div class="tile"><div class="k">Staff</div><div class="v">${PT.esc(t.staff)}</div></div>
+    <div class="tile"><div class="k">Cold chain / fridge</div><div class="v">${PT.esc(t.cold_chain)}</div></div>
+    <div class="tile"><div class="k">Connectivity</div><div class="v">${PT.esc(t.connectivity)}</div></div>
+    <div class="tile"><div class="k">Days since last report</div><div class="v">${PT.esc(t.last_report)}</div></div>
+    <div class="tile"><div class="k">Distance to next facility</div><div class="v">${t.distance_km.toFixed(0)} km</div></div>`;
+
+  $("#silence-type").textContent = `${d.silence_type} · trouble forecast ${PT.pct(d.trouble_prob)} (±${PT.pct(d.trouble_uncertainty)})`;
+  $("#action").textContent = d.suggested_action;
+
+  const mk = (label, extra) => `<button class="btn sm" data-act="${extra}">${label}</button>`;
+  $("#btns").innerHTML = [
+    mk("Confirmed", "status:confirmed"), mk("Cleared", "status:cleared"), mk("Just late", "status:just_late"),
+    mk(d.visited ? "Visited ✓" : "Mark visited", "visit"),
+    mk("Override: HIGH", "override:HIGH"), mk("Override: MEDIUM", "override:MEDIUM"),
+    mk("Override: LOW", "override:LOW"), mk("Clear override", "override:null"),
+  ].join("");
+  $("#btns").querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
+    const [kind, val] = b.dataset.act.split(":");
+    try {
+      if (kind === "status") await PT.api(`/api/facility/${encodeURIComponent(fid)}/feedback`, { method: "POST", body: { status: val } });
+      else if (kind === "visit") await PT.api(`/api/facility/${encodeURIComponent(fid)}/visited`, { method: "POST", body: {} });
+      else if (kind === "override") await PT.api(`/api/facility/${encodeURIComponent(fid)}/override`, { method: "POST", body: { tag: val === "null" ? null : val } });
+      PT.toast("Saved"); boot();
+    } catch (e) { PT.toast(e.message); }
+  }));
+
+  $("#wa-btns").querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
+    const to = prompt("Facility in-charge's WhatsApp number (with country code). Leave blank to just preview the message.", "");
+    b.disabled = true;
+    try {
+      const res = await PT.api(`/api/facility/${encodeURIComponent(fid)}/send_whatsapp`, { method: "POST", body: { kind: b.dataset.kind, to: to || undefined } });
+      if (res.dry_run) PT.toast("Preview only (no number given) — message is ready, nothing was sent.");
+      else if (res.sent) PT.toast(`Sent to ${res.to}`);
+      else PT.toast(`Not sent: ${res.reason || "unknown error"}`);
+    } catch (e) { PT.toast(e.message); }
+    b.disabled = false;
+  }));
+}
+boot();
+</script>
+</body>
+</html>

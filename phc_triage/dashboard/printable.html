@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHC Triage — Printable list</title>
+<style>
+  body { font: 13px/1.4 "IBM Plex Sans", system-ui, sans-serif; margin: 24px; color: #18201d; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: #555; margin: 0 0 16px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f0efe9; font-size: 11px; text-transform: uppercase; }
+  .tag { font-weight: 700; }
+  .box { width: 16px; height: 16px; border: 1px solid #333; display: inline-block; margin-right: 4px; }
+  .toolbar { margin-bottom: 14px; }
+  @media print { .toolbar { display: none; } }
+</style>
+</head>
+<body>
+  <div class="toolbar"><button onclick="window.print()">Print</button></div>
+  <h1 id="title">PHC Triage — priority list</h1>
+  <p class="sub" id="sub">Sample data</p>
+  <table>
+    <thead><tr><th>#</th><th>Facility</th><th>Tag</th><th>People</th><th>Reason</th><th>Action</th><th>Confirmed</th><th>Cleared</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+<script src="/static/js/config.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+"use strict";
+(async () => {
+  const params = new URLSearchParams(location.search);
+  const lga = params.get("lga"), capacity = params.get("capacity") || 12;
+  if (!lga) { document.body.innerHTML = "<p>Missing ?lga=</p>"; return; }
+  let d;
+  try { d = await PT.api(`/api/printable${PT.qs({ lga, capacity })}`); }
+  catch (e) { document.body.innerHTML = `<p>${PT.esc(e.message)}</p>`; return; }
+  document.getElementById("title").textContent = `PHC Triage — ${d.lga}`;
+  document.getElementById("sub").textContent = `Data as of ${d.data_as_of} · Sample data · Printed ${new Date().toLocaleDateString("en-GB")}`;
+  document.getElementById("rows").innerHTML = d.cards.map((c) => `
+    <tr><td>${c.rank}</td><td>${PT.esc(c.name)}</td><td class="tag">${c.tag}</td><td>${PT.esc(c.people_served_label)}</td>
+      <td>${PT.esc(c.reason)}</td><td>${PT.esc(c.suggested_action)}</td>
+      <td><span class="box"></span></td><td><span class="box"></span></td></tr>`).join("");
+  setTimeout(() => window.print(), 300);
+})();
+</script>
+</body>
+</html>

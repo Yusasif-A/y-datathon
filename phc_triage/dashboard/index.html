@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHC Triage — Officer list</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header class="topbar no-print" id="topbar"></header>
+<main class="shell">
+  <div class="page-head">
+    <h1 id="lga-title">Officer list</h1>
+    <p class="sub" id="data-as-of"></p>
+  </div>
+
+  <div class="trip-input no-print">
+    <label for="lga-select">LGA</label>
+    <select class="select" id="lga-select"></select>
+    <label for="capacity">How many visits can you make this week?</label>
+    <input class="input" type="number" id="capacity" min="1" max="50" value="12">
+    <a class="btn sm" id="export-csv" href="#">Export CSV</a>
+    <button class="btn sm" id="print-btn" type="button">Printable list</button>
+    <button class="btn sm" id="send-whatsapp-btn" type="button">Send WhatsApp brief</button>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="label">Facilities in LGA</div><div class="value" id="k-total">—</div></div>
+    <div class="kpi high"><div class="label">Flagged this week</div><div class="value" id="k-flagged">—</div></div>
+    <div class="kpi medium"><div class="label">LGA-wide alerts</div><div class="value" id="k-alerts">—</div></div>
+  </div>
+
+  <div id="banners"></div>
+  <div class="card-list" id="cards"><div class="empty-note">Loading…</div></div>
+</main>
+<script src="/static/js/config.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+
+async function boot() {
+  PT.topbar("officer");
+  let meta;
+  try { meta = await PT.api("/api/meta"); }
+  catch (e) { $("#cards").innerHTML = `<div class="empty-note">${PT.esc(e.message)}</div>`; return; }
+  $("#data-as-of").textContent = `${meta.state} · Data as of ${meta.data_as_of} · Sample data`;
+  $("#lga-select").innerHTML = meta.lgas.map((l) => `<option>${PT.esc(l)}</option>`).join("");
+
+  const saved = new URLSearchParams(location.search).get("lga");
+  if (saved && meta.lgas.includes(saved)) $("#lga-select").value = saved;
+
+  $("#lga-select").addEventListener("change", load);
+  $("#capacity").addEventListener("change", load);
+  $("#print-btn").addEventListener("click", () => {
+    const lga = $("#lga-select").value, cap = $("#capacity").value;
+    window.open(`/printable.html?lga=${encodeURIComponent(lga)}&capacity=${cap}`, "_blank");
+  });
+  $("#send-whatsapp-btn").addEventListener("click", sendWhatsAppBrief);
+  load();
+}
+
+async function sendWhatsAppBrief() {
+  const lga = $("#lga-select").value, capacity = Number($("#capacity").value) || 12;
+  const to = prompt(`Officer's WhatsApp number for ${lga} (with country code, e.g. 2348...). Leave blank to just preview the message.`, "");
+  const btn = $("#send-whatsapp-btn");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const res = await PT.api(`/api/officer/${encodeURIComponent(lga)}/send_whatsapp`, { method: "POST", body: { capacity, to: to || undefined } });
+    if (res.dry_run) PT.toast("Preview only (no number given) — message is ready, nothing was sent.");
+    else if (res.sent) PT.toast(`Sent to ${res.to}`);
+    else PT.toast(`Not sent: ${res.reason || "unknown error"}`);
+  } catch (e) { PT.toast(e.message); }
+  btn.disabled = false; btn.textContent = "Send WhatsApp brief";
+}
+
+async function load() {
+  const lga = $("#lga-select").value;
+  const capacity = Number($("#capacity").value) || 12;
+  $("#lga-title").textContent = `Officer list — ${lga}`;
+  history.replaceState(null, "", `?lga=${encodeURIComponent(lga)}`);
+  $("#export-csv").href = `${window.PHC_API || ""}/api/export.csv${PT.qs({ lga })}`;
+  $("#cards").innerHTML = `<div class="empty-note">Loading…</div>`;
+  let data;
+  try { data = await PT.api(`/api/officer/${encodeURIComponent(lga)}${PT.qs({ capacity })}`); }
+  catch (e) { $("#cards").innerHTML = `<div class="empty-note">${PT.esc(e.message)}</div>`; return; }
+
+  $("#k-total").textContent = PT.num(data.facilities_in_lga);
+  $("#k-flagged").textContent = PT.num(data.flagged_this_week);
+  $("#k-alerts").textContent = PT.num(data.lga_wide_alerts);
+  $("#banners").innerHTML = (data.warning_banners || [])
+    .map((a) => `<div class="banner ${a.cause === "insecure_silence" ? "critical" : ""}">⚠️ ${PT.esc(a.message)}</div>`).join("");
+  $("#cards").innerHTML = data.cards.length
+    ? data.cards.map(PT.cardHtml).join("")
+    : `<div class="empty-note">Nothing flagged for this LGA right now.</div>`;
+  PT.bindCardActions($("#cards"));
+}
+
+boot();
+</script>
+</body>
+</html>

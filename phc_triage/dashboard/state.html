@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHC Triage — State overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header class="topbar no-print" id="topbar"></header>
+<main class="shell">
+  <div class="page-head">
+    <h1>State overview</h1>
+    <p class="sub" id="data-as-of"></p>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="label">Total PHCs</div><div class="value" id="k-total">—</div></div>
+    <div class="kpi high"><div class="label">High</div><div class="value" id="k-high">—</div></div>
+    <div class="kpi medium"><div class="label">Medium</div><div class="value" id="k-medium">—</div></div>
+    <div class="kpi low"><div class="label">Low</div><div class="value" id="k-low">—</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>LGAs — tap to open that officer list</h2>
+    <div class="lga-grid" id="lga-grid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Cluster alerts</h2>
+    <div id="clusters"><p class="faint">None right now.</p></div>
+  </div>
+
+  <div class="panel">
+    <h2>LGAs ranked by flagged facilities</h2>
+    <div class="table-wrap"><table class="grid" id="lga-table"></table></div>
+  </div>
+
+  <div class="panel">
+    <h2>Model validation <span class="faint">— all numbers below are from synthetic data</span></h2>
+    <div id="validation"><p class="faint">Loading…</p></div>
+  </div>
+</main>
+<script src="/static/js/config.js"></script>
+<script src="/static/js/app.js"></script>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+
+async function boot() {
+  PT.topbar("state");
+  let data;
+  try { data = await PT.api("/api/state/overview"); }
+  catch (e) { $("#lga-grid").innerHTML = `<div class="empty-note">${PT.esc(e.message)}</div>`; return; }
+
+  $("#data-as-of").textContent = `${data.state} · Data as of ${data.data_as_of} · Sample data`;
+  $("#k-total").textContent = PT.num(data.total_phcs);
+  $("#k-high").textContent = PT.num(data.high);
+  $("#k-medium").textContent = PT.num(data.medium);
+  $("#k-low").textContent = PT.num(data.low);
+
+  $("#lga-grid").innerHTML = data.lga_tiles.map((l) => `
+    <a class="lga-tile" href="/?lga=${encodeURIComponent(l.lga)}">
+      <div class="name">${PT.esc(l.lga)}</div>
+      <div class="counts"><span class="h">${l.high} high</span><span class="m">${l.medium} med</span><span class="l">${l.low} low</span></div>
+      <div class="faint" style="margin-top:6px;font-size:12px">${l.facilities} facilities</div>
+    </a>`).join("");
+
+  $("#clusters").innerHTML = data.cluster_alerts.length
+    ? data.cluster_alerts.map((a) => `<div class="cluster-item ${a.cause}">⚠️ ${PT.esc(a.message)}</div>`).join("")
+    : `<p class="faint">None right now.</p>`;
+
+  $("#lga-table").innerHTML = `<thead><tr><th>LGA</th><th>Facilities</th><th>High</th><th>Medium</th><th>Low</th><th>Flagged</th></tr></thead>
+    <tbody>${data.lga_tiles.map((l) => `<tr class="clickable" data-lga="${PT.esc(l.lga)}">
+      <td>${PT.esc(l.lga)}</td><td>${l.facilities}</td><td>${l.high}</td><td>${l.medium}</td><td>${l.low}</td><td><b>${l.flagged}</b></td></tr>`).join("")}</tbody>`;
+  document.querySelectorAll("#lga-table tr[data-lga]").forEach((tr) => tr.addEventListener("click", () => {
+    location.href = `/?lga=${encodeURIComponent(tr.dataset.lga)}`;
+  }));
+
+  loadValidation();
+}
+
+async function loadValidation() {
+  let v;
+  try { v = await PT.api("/api/validation"); }
+  catch (e) { $("#validation").innerHTML = `<p class="faint">Not available yet.</p>`; return; }
+  const mp = v.model_precision_recall_at_k, bp = v.baseline_precision_recall_at_k;
+  const st = v.stress_test;
+  $("#validation").innerHTML = `
+    <p class="faint">${PT.esc(v.note)}</p>
+    <div class="kpis" style="margin-top:4px">
+      <div class="kpi"><div class="label">Model precision@${mp.k}</div><div class="value">${PT.pct(mp.precision)}</div></div>
+      <div class="kpi"><div class="label">Baseline precision@${bp.k}</div><div class="value">${PT.pct(bp.precision)}</div></div>
+      <div class="kpi"><div class="label">Beats baseline</div><div class="value">${v.beats_baseline ? "Yes" : "No"}</div></div>
+      <div class="kpi"><div class="label">Detection lag</div><div class="value">${v.detection_lag_months_vs_baseline} mo earlier</div></div>
+    </div>
+    <p style="margin-top:12px"><b>Stress test</b> (trained on ${v.train_world.link_strength}-link world, graded on a different ${v.stress_world.link_strength}-link world):
+      model ${PT.pct(st.model_precision_recall_at_k.precision)} vs baseline ${PT.pct(st.baseline_precision_recall_at_k.precision)} —
+      ${st.beats_baseline ? "still beats the baseline." : "does not beat the baseline on this harder world."}</p>
+    <p><b>Fairness check</b> — rural precision@k ${PT.pct(v.fairness_rural_vs_urban.rural.precision)} vs urban ${PT.pct(v.fairness_rural_vs_urban.urban.precision)}.</p>
+    <p class="faint">Brier score ${v.brier_score} (lower is better-calibrated).</p>`;
+}
+boot();
+</script>
+</body>
+</html>

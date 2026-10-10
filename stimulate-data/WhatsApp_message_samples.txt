@@ -1,0 +1,14 @@
+WhatsApp message samples (SAMPLE DATA, for mock-ups only)
+
+--- officer_weekly_brief | to: Officer | link: yes ---
+Weekly priority list, Saki West (SAMPLE DATA). Data as of 9 Oct 2026.
+1) Akojiri PHC Level 2: HIGH. Check in: unreliable reporting, incomplete forms. Serves about 45,500 people. Suggested action: Monitor; chase paperwork if reports stay late.
+2) Olado PHC Level 2: HIGH. Check in: falling patient volumes, late reports. Serves about 32,600 people. Suggested action: Call the in-charge about falling patient numbers.
+3) Igirodu PHC Level 1: HIGH. Check in: no report for 1 months, unreliable reporting. Serves about 16,500 people. Suggested action: Monitor; chase paperwork if reports stay late.
+Open full list: https://example.org/officer/saki-west
+
+--- facility_reminder | to: Facility in-charge | link: no ---
+Hello, we have not received your report for September for Akojiri PHC Level 2. Please send it to your LGA records officer. Thank you. (SAMPLE)
+
+--- facility_confirmation_question | to: Facility in-charge | link: no ---
+Please confirm: is your vaccine fridge working? Reply YES or NO. (SAMPLE)
