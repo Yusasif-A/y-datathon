@@ -7,6 +7,8 @@ phc_triage/backend/data/feedback.json
 # PHC Triage simulator outputs: large, rebuilt exactly by phc_triage/generate_all.py
 phc_triage/data/**/*.csv
 !phc_triage/data/worlds_summary.csv
+# ...except what the dashboard needs to serve the new model (model-visible files only, no truth)
+!phc_triage/data/baseline/facilities.csv
+!phc_triage/data/baseline/reports.csv
+!phc_triage/data/baseline/stock_reports.csv
 phc_triage/data/**/preview.xlsx
-# Trained model bundle (16 MB): rebuild with `cd phc_triage && python -m ml.train --quick`
-phc_triage/models/*.joblib
