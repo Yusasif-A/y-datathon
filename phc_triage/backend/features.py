@@ -25,7 +25,8 @@ FEATURE_COLUMNS = [
     "months_since_last_report", "reported_rate_3m", "reported_rate_6m",
     "reported_rate_12m", "reported_rate_24m", "on_time_rate_6m",
     "completeness_6m", "sudden_drop_signal", "lga_concurrent_silent_frac",
-    "service_total_z", "service_trend_3m", "fp_z", "vacc_z", "ors_z",
+    "service_total_z", "service_trend_3m", "fp_z", "vacc_z", "ors_z", "mal_z",
+    "stock_days_out_now", "stock_reported_flag",
     "season_sin", "season_cos",
 ]
 
@@ -87,10 +88,20 @@ def build_panel(world: dict) -> pd.DataFrame:
     recent_mean = g["service_total"].transform(lambda s: s.shift(1).rolling(3, min_periods=1).mean())
     panel["service_trend_3m"] = ((recent_mean - base_mean) / base_mean.replace(0, np.nan)).clip(-1, 1)
 
-    for col, out in [("family_planning_visits", "fp_z"), ("penta3_vaccinations", "vacc_z"), ("ors_given", "ors_z")]:
+    for col, out in [("family_planning_visits", "fp_z"), ("penta3_vaccinations", "vacc_z"),
+                     ("ors_given", "ors_z"), ("antimalarial_treatments", "mal_z")]:
+        if col not in panel.columns:
+            continue
         bm = g[col].transform(lambda s: s.shift(1).rolling(12, min_periods=3).mean())
         bs = g[col].transform(lambda s: s.shift(1).rolling(12, min_periods=3).std())
         panel[out] = ((panel[col] - bm) / bs.replace(0, np.nan)).clip(-5, 5)
+
+    # Stock days-out: real signal "where it exists" (the doc's own phrasing) —
+    # only some facilities report it, so it's sparse by design, never faked.
+    stock_cols = [c for c in panel.columns if c.startswith("days_out_")]
+    if stock_cols:
+        panel["stock_days_out_now"] = panel[stock_cols].fillna(0).sum(axis=1)
+        panel["stock_reported_flag"] = panel[stock_cols].notna().any(axis=1).astype(int)
 
     panel["population_log"] = np.log1p(panel["population"])
     panel["staff_ratio"] = panel["staff_count"] / panel["staff_standard"]

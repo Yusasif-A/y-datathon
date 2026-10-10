@@ -42,6 +42,7 @@
 
   <div class="panel no-print">
     <h2>WhatsApp to the facility <span class="faint">— mock-up: sent only after you review it here, never automatic</span></h2>
+    <p class="faint" id="wa-contact" style="margin-top:0"></p>
     <div id="wa-btns" style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn sm" data-kind="reminder">Send report reminder</button>
       <button class="btn sm" data-kind="confirmation">Send fridge check (YES/NO)</button>
@@ -104,6 +105,16 @@ async function boot() {
   $("#silence-type").textContent = `${d.silence_type} · trouble forecast ${PT.pct(d.trouble_prob)} (±${PT.pct(d.trouble_uncertainty)})`;
   $("#action").textContent = d.suggested_action;
 
+  const ch = d.contact_hint || {};
+  $("#wa-contact").textContent = ch.phone_sample
+    ? `Sample contact on file: ${ch.phone_sample} (${ch.whatsapp_opt_in ? "opted in" : "not opted in"}) — not auto-used, you choose the real number when sending.`
+    : "No sample contact on file for this facility.";
+  const reminderBtn = document.querySelector('[data-kind="reminder"]');
+  if (reminderBtn && d.months_since_last_report === 0) {
+    reminderBtn.disabled = true;
+    reminderBtn.title = "Reported on time this month — a reminder would be factually wrong.";
+  }
+
   const mk = (label, extra) => `<button class="btn sm" data-act="${extra}">${label}</button>`;
   $("#btns").innerHTML = [
     mk("Confirmed", "status:confirmed"), mk("Cleared", "status:cleared"), mk("Just late", "status:just_late"),
@@ -122,12 +133,13 @@ async function boot() {
   }));
 
   $("#wa-btns").querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
-    const to = prompt("Facility in-charge's WhatsApp number (with country code). Leave blank to just preview the message.", "");
+    const hint = ch.phone_sample ? ` (sample contact on file: ${ch.phone_sample} — not auto-used)` : "";
+    const to = prompt(`Facility in-charge's WhatsApp number, with country code${hint}. Leave blank to just preview.`, "");
+    if (!to) { PT.toast("Preview only — message is ready, nothing was sent."); return; }
     b.disabled = true;
     try {
-      const res = await PT.api(`/api/facility/${encodeURIComponent(fid)}/send_whatsapp`, { method: "POST", body: { kind: b.dataset.kind, to: to || undefined } });
-      if (res.dry_run) PT.toast("Preview only (no number given) — message is ready, nothing was sent.");
-      else if (res.sent) PT.toast(`Sent to ${res.to}`);
+      const res = await PT.api(`/api/facility/${encodeURIComponent(fid)}/send_whatsapp`, { method: "POST", body: { kind: b.dataset.kind, to } });
+      if (res.sent) PT.toast(`Sent to ${res.to}`);
       else PT.toast(`Not sent: ${res.reason || "unknown error"}`);
     } catch (e) { PT.toast(e.message); }
     b.disabled = false;

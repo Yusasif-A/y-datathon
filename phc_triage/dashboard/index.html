@@ -64,13 +64,18 @@ async function boot() {
 
 async function sendWhatsAppBrief() {
   const lga = $("#lga-select").value, capacity = Number($("#capacity").value) || 12;
-  const to = prompt(`Officer's WhatsApp number for ${lga} (with country code, e.g. 2348...). Leave blank to just preview the message.`, "");
   const btn = $("#send-whatsapp-btn");
-  btn.disabled = true; btn.textContent = "Sending…";
+  btn.disabled = true; btn.textContent = "Preparing…";
+  let preview;
+  try { preview = await PT.api(`/api/officer/${encodeURIComponent(lga)}/send_whatsapp`, { method: "POST", body: { capacity } }); }
+  catch (e) { PT.toast(e.message); btn.disabled = false; btn.textContent = "Send WhatsApp brief"; return; }
+  const hint = preview.sample_contact_hint ? ` (LGA coordinator sample contact on file: ${preview.sample_contact_hint} — not auto-used)` : "";
+  const to = prompt(`Officer's WhatsApp number for ${lga}, with country code${hint}. Leave blank to just preview.`, "");
+  btn.textContent = "Sending…";
+  if (!to) { PT.toast("Preview only — message is ready, nothing was sent."); btn.disabled = false; btn.textContent = "Send WhatsApp brief"; return; }
   try {
-    const res = await PT.api(`/api/officer/${encodeURIComponent(lga)}/send_whatsapp`, { method: "POST", body: { capacity, to: to || undefined } });
-    if (res.dry_run) PT.toast("Preview only (no number given) — message is ready, nothing was sent.");
-    else if (res.sent) PT.toast(`Sent to ${res.to}`);
+    const res = await PT.api(`/api/officer/${encodeURIComponent(lga)}/send_whatsapp`, { method: "POST", body: { capacity, to } });
+    if (res.sent) PT.toast(`Sent to ${res.to}`);
     else PT.toast(`Not sent: ${res.reason || "unknown error"}`);
   } catch (e) { PT.toast(e.message); }
   btn.disabled = false; btn.textContent = "Send WhatsApp brief";

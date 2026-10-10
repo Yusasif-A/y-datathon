@@ -44,7 +44,8 @@ FEATURE_GROUP = {
     "completeness_6m": "Reporting / silence",
     "fp_z": "Medicine / family planning", "service_trend_3m": "Medicine / family planning",
     "vacc_z": "Vaccine / cold chain", "power_reliability": "Vaccine / cold chain",
-    "ors_z": "Medicine / family planning",
+    "ors_z": "Medicine / family planning", "mal_z": "Medicine / family planning",
+    "stock_days_out_now": "Medicine / family planning", "stock_reported_flag": "Medicine / family planning",
     "staff_ratio": "Staff", "service_total_z": "Staff",
     "connectivity": "Infrastructure", "records_officer_present": "Infrastructure",
     "funding_delayed": "Infrastructure", "funding_severely_delayed": "Infrastructure",
@@ -161,6 +162,8 @@ def build_risk_table(world: dict, bundle: dict, as_of_month: int | None = None) 
     name_cols = ["facility_id", "name", "lga", "state", "lat", "lon", "population", "urban",
                 "power_reliability", "connectivity", "staff_count", "staff_standard", "distance_km",
                 "insecurity"]
+    optional_cols = [c for c in ("in_charge_phone_sample", "whatsapp_opt_in") if c in world["facilities"].columns]
+    name_cols = name_cols + optional_cols
     out = snap.merge(world["facilities"][name_cols], on="facility_id", suffixes=("", "_fac"))
     keep = name_cols + [
         "reported", "months_since_last_report", "reported_rate_12m", "on_time_rate_6m",

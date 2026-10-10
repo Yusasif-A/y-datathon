@@ -27,6 +27,7 @@ from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import brier_score_loss, log_loss
 
+import data_loader
 import features
 import simulator
 
@@ -35,11 +36,28 @@ warnings.filterwarnings("ignore")
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
+# The hand-built dataset in stimulate-data/ (real Oyo State LGAs, 311
+# facilities, 36 months, two pre-built worlds) is richer than our own
+# generator — prefer it when present, fall back to simulator.py otherwise.
+USE_STIMULATE_DATA = data_loader.available()
+
 TRAIN_SEED = 1
 STRESS_SEED = 7
 TRAIN_LINK = "medium"
 STRESS_LINK = "weak"
 N_ENSEMBLE = 5
+
+
+def _load_train_world():
+    if USE_STIMULATE_DATA:
+        return data_loader.load_world("A")
+    return simulator.generate_world(seed=TRAIN_SEED, link_strength=TRAIN_LINK)
+
+
+def _load_stress_world():
+    if USE_STIMULATE_DATA:
+        return data_loader.load_world("B")
+    return simulator.generate_world(seed=STRESS_SEED, link_strength=STRESS_LINK)
 
 
 def _time_split(panel: pd.DataFrame, train_frac: float = 0.7):
@@ -120,8 +138,8 @@ def calibration_table(probs: np.ndarray, labels: np.ndarray, bins: int = 5) -> l
 
 
 def run_training() -> dict:
-    train_world = simulator.generate_world(seed=TRAIN_SEED, link_strength=TRAIN_LINK)
-    stress_world = simulator.generate_world(seed=STRESS_SEED, link_strength=STRESS_LINK)
+    train_world = _load_train_world()
+    stress_world = _load_stress_world()
 
     panel = features.build_panel(train_world)
     stress_panel = features.build_panel(stress_world)
@@ -176,9 +194,11 @@ def run_training() -> dict:
     detection_lag_months = round(float(np.mean(lag_rows)), 2) if lag_rows else 0.0
 
     validation = {
-        "note": "All numbers below are from SYNTHETIC data (the simulator), labelled as such for the demo.",
-        "train_world": {"seed": TRAIN_SEED, "link_strength": TRAIN_LINK},
-        "stress_world": {"seed": STRESS_SEED, "link_strength": STRESS_LINK},
+        "note": f"All numbers below are from SYNTHETIC data ({train_world.get('source', 'simulator.py')}), labelled as such for the demo.",
+        "train_world": {"seed": train_world["seed"], "link_strength": train_world["link_strength"],
+                       "source": train_world.get("source", "simulator.py")},
+        "stress_world": {"seed": stress_world["seed"], "link_strength": stress_world["link_strength"],
+                         "source": stress_world.get("source", "simulator.py")},
         "k_evaluated": k,
         "model_precision_recall_at_k": model_pr,
         "baseline_precision_recall_at_k": baseline_pr,

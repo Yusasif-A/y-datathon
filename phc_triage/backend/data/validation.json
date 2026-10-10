@@ -1,90 +1,92 @@
 {
-  "note": "All numbers below are from SYNTHETIC data (the simulator), labelled as such for the demo.",
+  "note": "All numbers below are from SYNTHETIC data (stimulate-data), labelled as such for the demo.",
   "train_world": {
-    "seed": 1,
-    "link_strength": "medium"
+    "seed": "A",
+    "link_strength": "medium",
+    "source": "stimulate-data"
   },
   "stress_world": {
-    "seed": 7,
-    "link_strength": "weak"
+    "seed": "B",
+    "link_strength": "weak",
+    "source": "stimulate-data"
   },
-  "k_evaluated": 210,
+  "k_evaluated": 513,
   "model_precision_recall_at_k": {
-    "k": 210,
-    "precision": 0.71,
-    "recall": 0.345
+    "k": 513,
+    "precision": 0.538,
+    "recall": 0.356
   },
   "baseline_precision_recall_at_k": {
-    "k": 210,
-    "precision": 0.39,
-    "recall": 0.19
+    "k": 513,
+    "precision": 0.257,
+    "recall": 0.17
   },
   "beats_baseline": true,
   "calibration": [
     {
-      "bucket": "(0.0407, 0.145]",
-      "predicted_mean": 0.122,
-      "actual_rate": 0.129,
-      "n": 280
+      "bucket": "(0.0314, 0.15]",
+      "predicted_mean": 0.121,
+      "actual_rate": 0.077,
+      "n": 697
     },
     {
-      "bucket": "(0.145, 0.174]",
-      "predicted_mean": 0.158,
-      "actual_rate": 0.206,
-      "n": 282
+      "bucket": "(0.15, 0.194]",
+      "predicted_mean": 0.172,
+      "actual_rate": 0.119,
+      "n": 683
     },
     {
-      "bucket": "(0.174, 0.209]",
-      "predicted_mean": 0.19,
-      "actual_rate": 0.246,
-      "n": 280
+      "bucket": "(0.194, 0.252]",
+      "predicted_mean": 0.223,
+      "actual_rate": 0.16,
+      "n": 673
     },
     {
-      "bucket": "(0.209, 0.267]",
-      "predicted_mean": 0.236,
-      "actual_rate": 0.325,
-      "n": 286
+      "bucket": "(0.252, 0.331]",
+      "predicted_mean": 0.288,
+      "actual_rate": 0.285,
+      "n": 684
     },
     {
-      "bucket": "(0.267, 0.775]",
-      "predicted_mean": 0.413,
-      "actual_rate": 0.647,
-      "n": 272
+      "bucket": "(0.331, 0.917]",
+      "predicted_mean": 0.438,
+      "actual_rate": 0.493,
+      "n": 684
     }
   ],
-  "brier_score": 0.1907,
+  "brier_score": 0.153,
   "fairness_rural_vs_urban": {
     "rural": {
-      "k": 148,
-      "precision": 0.608,
-      "recall": 0.319
+      "k": 290,
+      "precision": 0.583,
+      "recall": 0.282
     },
     "urban": {
-      "k": 61,
-      "precision": 0.836,
-      "recall": 0.34
+      "k": 222,
+      "precision": 0.243,
+      "recall": 0.309
     }
   },
   "stress_test": {
     "model_precision_recall_at_k": {
-      "k": 690,
-      "precision": 0.529,
-      "recall": 0.307
+      "k": 1632,
+      "precision": 0.39,
+      "recall": 0.283
     },
     "baseline_precision_recall_at_k": {
-      "k": 690,
-      "precision": 0.33,
-      "recall": 0.192
+      "k": 1632,
+      "precision": 0.219,
+      "recall": 0.159
     },
     "beats_baseline": true
   },
-  "detection_lag_months_vs_baseline": 0.92,
+  "detection_lag_months_vs_baseline": 0.96,
   "silence_cause_label_counts": {
-    "none": 3209,
-    "chronic_poor_reporter": 792,
-    "late_entry": 558,
-    "sudden_drop": 175,
-    "lga_wide": 50,
-    "insecure_silence": 16
+    "none": 6649,
+    "late_entry": 3273,
+    "chronic_poor_reporter": 585,
+    "lga_wide": 334,
+    "sudden_drop": 283,
+    "insecure_silence": 72
   }
 }

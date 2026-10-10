@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import data_loader
 import scoring
 import simulator
 import train
@@ -76,6 +77,8 @@ def _bootstrap():
         STATE["world"] = result["world"]
         STATE["validation"] = result["validation"]
     _refresh_risk_table()
+    STATE["lga_phones"] = data_loader.lga_coordinator_phones(STATE["world"].get("seed", "A")) \
+        if data_loader.available() else {}
     if not FEEDBACK_PATH.exists():
         _save_feedback({})
     logger.info("PHC Triage ready — %d facilities, %d LGAs", len(STATE["world"]["facilities"]), len(STATE["world"]["lgas"]))
@@ -205,6 +208,10 @@ async def facility_detail(facility_id: str):
         },
         "officer_status": fb.get("status"), "visited": bool(fb.get("visited", False)),
         "override_tag": fb.get("override_tag"), "sample_data": True,
+        "contact_hint": {
+            "phone_sample": None if pd.isna(r.get("in_charge_phone_sample")) else str(r.get("in_charge_phone_sample")),
+            "whatsapp_opt_in": None if pd.isna(r.get("whatsapp_opt_in")) else bool(r.get("whatsapp_opt_in")),
+        },
     }
 
 
@@ -344,9 +351,10 @@ async def send_officer_brief(lga: str, body: dict | None = None):
     capacity = int(body.get("capacity") or 12)
     data = await officer_list(lga, capacity)
     text = _weekly_brief_template(lga, data["cards"], data["warning_banners"])
+    sample_hint = STATE.get("lga_phones", {}).get(lga)
     to = body.get("to")
     if not to:
-        return {"lga": lga, "text": text, "sent": False, "dry_run": True,
+        return {"lga": lga, "text": text, "sent": False, "dry_run": True, "sample_contact_hint": sample_hint,
                 "reason": "No real recipient number given — this is a preview, not configured to text a fabricated sample number."}
     result = await whatsapp.send_text(to, text)
     return {"lga": lga, "to": to, "text": text, "sent": result["ok"], "dry_run": False, **result}
@@ -362,11 +370,17 @@ async def send_facility_message(facility_id: str, body: dict):
     row = rt[rt["facility_id"] == facility_id]
     if row.empty:
         raise HTTPException(404, "Unknown facility")
-    name = row.iloc[0]["name"]
+    rrow = row.iloc[0]
+    if kind == "reminder" and int(rrow["months_since_last_report"]) == 0:
+        raise HTTPException(409, "This facility reported on time this month — a reminder would be factually wrong.")
+    name = rrow["name"]
     text = _facility_message(kind, name)
+    sample_hint = None if pd.isna(rrow.get("in_charge_phone_sample")) else str(rrow.get("in_charge_phone_sample"))
+    opt_in = None if pd.isna(rrow.get("whatsapp_opt_in")) else bool(rrow.get("whatsapp_opt_in"))
     to = body.get("to")
     if not to:
         return {"facility_id": facility_id, "text": text, "sent": False, "dry_run": True,
+                "sample_contact_hint": sample_hint, "whatsapp_opt_in": opt_in,
                 "reason": "No real recipient number given — this is a preview, not configured to text a fabricated sample number."}
     result = await whatsapp.send_text(to, text)
     return {"facility_id": facility_id, "to": to, "text": text, "sent": result["ok"], "dry_run": False, **result}
