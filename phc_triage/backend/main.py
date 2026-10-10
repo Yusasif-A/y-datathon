@@ -15,6 +15,7 @@ but our own store.
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -30,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+import alerts
 import data_loader
 import scoring
 import simulator
@@ -124,7 +126,9 @@ def _bootstrap():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _bootstrap()
+    task = asyncio.create_task(_alert_loop())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="PHC Triage API", lifespan=lifespan)
@@ -524,6 +528,68 @@ async def validation():
     return STATE["validation"]
 
 
+def _urgent_cards(lga: str) -> list:
+    """HIGH facilities still on the officer's to-do list, highest priority first."""
+    rt = _risk_with_feedback()
+    g = rt[(rt["lga"] == lga) & (rt["tag"] == "HIGH") & (rt["queue"] == "to_do")]
+    return [_row_to_card(r) for _, r in g.sort_values("priority", ascending=False).iterrows()]
+
+
+async def _check_all_alerts():
+    for lga in alerts.subscribed_lgas():
+        if lga in STATE["world"]["lgas"]:
+            try:
+                await alerts.run_check(lga, _urgent_cards(lga))
+            except Exception:
+                logger.exception("Alert check failed for %s", lga)
+
+
+async def _alert_loop():
+    """Re-check every subscribed LGA on a timer, so new urgent facilities
+    reach the officer's WhatsApp without anyone opening the dashboard."""
+    while True:
+        await _check_all_alerts()
+        await asyncio.sleep(alerts.CHECK_INTERVAL_MIN * 60)
+
+
+def _known_lga(lga: str) -> None:
+    if lga not in STATE["world"]["lgas"]:
+        raise HTTPException(404, "Unknown LGA")
+
+
+@app.get("/api/alerts/{lga}")
+async def alert_status(lga: str):
+    _known_lga(lga)
+    return {**alerts.status(lga), "urgent_now": len(_urgent_cards(lga))}
+
+
+@app.post("/api/alerts/{lga}/subscribe")
+async def alert_subscribe(lga: str, body: dict):
+    """Save the officer's own WhatsApp number and send the first alert now."""
+    _known_lga(lga)
+    phone = alerts.clean_phone(str(body.get("phone") or ""))
+    if not phone:
+        raise HTTPException(400, "Enter the number with country code, digits only, e.g. 2348012345678.")
+    alerts.save_contact(lga, phone)
+    result = await alerts.run_check(lga, _urgent_cards(lga))
+    return {**alerts.status(lga), "check": result}
+
+
+@app.post("/api/alerts/{lga}/unsubscribe")
+async def alert_unsubscribe(lga: str):
+    _known_lga(lga)
+    alerts.remove_contact(lga)
+    return alerts.status(lga)
+
+
+@app.post("/api/alerts/{lga}/check")
+async def alert_check(lga: str, body: dict | None = None):
+    """Run the urgent check now (the timer also runs it). force=true re-sends everything urgent."""
+    _known_lga(lga)
+    result = await alerts.run_check(lga, _urgent_cards(lga), force=bool((body or {}).get("force")))
+    return {**alerts.status(lga), "check": result}
+
+
 @app.post("/api/admin/retrain")
 async def retrain():
     """Regenerate the world and retrain all three models from scratch."""
@@ -532,6 +598,7 @@ async def retrain():
     STATE["world"] = result["world"]
     STATE["validation"] = result["validation"]
     _refresh_risk_table()
+    await _check_all_alerts()
     return {"ok": True}
 
 

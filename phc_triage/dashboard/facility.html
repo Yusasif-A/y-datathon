@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PHC Triage — Facility</title>
+<title>Idon-Lafia — Facility</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/app.css">
@@ -72,7 +72,7 @@ async function boot() {
   try { d = await PT.api(`/api/facility/${encodeURIComponent(fid)}`); }
   catch (e) { $("#f-name").textContent = "Could not load"; PT.toast(e.message); return; }
 
-  document.title = `${d.name} — PHC Triage`;
+  document.title = `${d.name} — Idon-Lafia`;
   $("#f-name").textContent = d.name;
   $("#f-tag").textContent = d.tag; $("#f-tag").className = `tag ${d.tag}`;
   const statusNote = d.officer_status ? ` · Last check: ${PT.STATUS_LABELS[d.officer_status] || d.officer_status}` : "";

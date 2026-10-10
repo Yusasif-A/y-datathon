@@ -1,0 +1,10 @@
+runtime: python311
+
+entrypoint: uvicorn main:app --host 0.0.0.0 --port $PORT
+
+env_variables:
+  PORT: "8080"
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 10

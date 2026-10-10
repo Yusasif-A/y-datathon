@@ -1,4 +1,4 @@
-/* PHC Triage — tiny shared helpers. No framework; this is a hackathon demo. */
+/* Idon-Lafia — tiny shared helpers. No framework; this is a hackathon demo. */
 "use strict";
 
 const PT = (() => {
@@ -13,7 +13,7 @@ const PT = (() => {
     }
     let res;
     try { res = await fetch(url(path), init); }
-    catch (e) { throw new Error("PHC Triage backend is not reachable. Is it running on :8010?"); }
+    catch (e) { throw new Error("Idon-Lafia backend is not reachable. Is it running on :8010?"); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
     return data;
@@ -57,7 +57,7 @@ const PT = (() => {
     const el = document.getElementById("topbar");
     if (!el) return;
     el.innerHTML = `<div class="topbar-inner">
-      <a class="brand" href="/"><span class="mark"></span>PHC Triage <span class="sample-pill">Sample data</span></a>
+      <a class="brand" href="/"><span class="mark"></span>Idon-Lafia <span class="sample-pill">Sample data</span></a>
       <nav>
         <a href="/" data-nav="officer" ${active === "officer" ? 'aria-current="page"' : ""}>Officer list</a>
         <a href="/state.html" data-nav="state" ${active === "state" ? 'aria-current="page"' : ""}>State overview</a>

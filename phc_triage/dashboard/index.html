@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PHC Triage — Officer list</title>
+<title>Idon-Lafia — Officer list</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/app.css">
@@ -33,6 +33,26 @@
   </div>
 
   <div id="banners"></div>
+
+  <section class="panel alert-panel no-print" id="alert-panel">
+    <h2>Urgent WhatsApp alerts <span class="faint" id="alert-badge"></span></h2>
+    <p class="muted" id="alert-explain">Get a WhatsApp message when a facility in this LGA becomes HIGH priority, with a link straight to it. Only the number you save here is used.</p>
+    <div class="opt-in" id="alert-optin" hidden>
+      <strong id="optin-title">Step 1: send us one WhatsApp message first.</strong>
+      <span>WhatsApp only lets a business message you after you have messaged it in the last 24 hours. Tap the button, press send in WhatsApp, then come back.</span>
+      <a class="btn sm primary" id="optin-link" target="_blank" rel="noopener">Open WhatsApp and send START</a>
+    </div>
+    <form class="alert-row" id="alert-form">
+      <input class="input" id="alert-phone" type="tel" inputmode="numeric" placeholder="Your number, e.g. 2348012345678" autocomplete="tel">
+      <button class="btn sm primary" type="submit" id="alert-save">Turn on alerts</button>
+    </form>
+    <div class="alert-row" id="alert-on" hidden>
+      <button class="btn sm" type="button" id="alert-check">Check now</button>
+      <button class="btn sm" type="button" id="alert-resend">Resend all urgent</button>
+      <button class="btn sm ghost" type="button" id="alert-off">Turn off</button>
+    </div>
+    <ul class="alert-log faint" id="alert-log"></ul>
+  </section>
   <h2 class="list-head">To check this week <span class="faint" id="snoozed-note"></span></h2>
   <div class="card-list" id="cards"><div class="empty-note">Loading…</div></div>
   <section id="checking-section" hidden>
@@ -68,7 +88,64 @@ async function boot() {
     window.open(`/printable.html?lga=${encodeURIComponent(lga)}&capacity=${cap}`, "_blank");
   });
   $("#send-whatsapp-btn").addEventListener("click", sendWhatsAppBrief);
+  $("#alert-form").addEventListener("submit", (e) => { e.preventDefault(); alertAction("subscribe", { phone: $("#alert-phone").value }); });
+  $("#alert-check").addEventListener("click", () => alertAction("check"));
+  $("#alert-resend").addEventListener("click", () => alertAction("check", { force: true }));
+  $("#alert-off").addEventListener("click", () => alertAction("unsubscribe"));
   load();
+}
+
+function alertCheckToast(c) {
+  if (!c) return;
+  if (c.sent) PT.toast(`WhatsApp alert sent: ${c.new} urgent facilit${c.new === 1 ? "y" : "ies"}.`);
+  else if (c.needs_opt_in) PT.toast("Blocked by WhatsApp's 24-hour rule. Send START from your phone, then press Check now.");
+  else PT.toast(c.reason || "No alert sent.");
+}
+
+function renderAlerts(s) {
+  const on = s.subscribed;
+  $("#alert-form").hidden = on;
+  $("#alert-on").hidden = !on;
+  $("#alert-badge").textContent = on
+    ? (s.needs_opt_in ? `— on, but blocked until you message us` : `— on, sending to ${s.phone}`) : `— off`;
+  const urgent = `${s.urgent_now} urgent facilit${s.urgent_now === 1 ? "y" : "ies"} right now.`;
+  $("#alert-explain").textContent = on
+    ? `${urgent} Checked automatically every ${s.check_interval_min} min and after each data refresh; you only get a message when a facility newly becomes urgent.`
+    : `${urgent} Get a WhatsApp message when a facility in this LGA becomes HIGH priority, with a link straight to it. Only the number you save here is used.`;
+  if (!s.whatsapp_configured) $("#alert-explain").textContent += " (WhatsApp is not configured on the server, so messages will fail.)";
+  // Before subscribing, and whenever a send was refused, show the "message us first" step.
+  const showOptIn = s.opt_in_link && (!on || s.needs_opt_in);
+  $("#alert-optin").hidden = !showOptIn;
+  if (showOptIn) {
+    $("#optin-link").href = s.opt_in_link;
+    $("#optin-title").textContent = on
+      ? "Your last alert was blocked: send us one WhatsApp message, then press Check now."
+      : `Step 1: send one WhatsApp message to ${s.business_number}.`;
+  }
+  $("#alert-log").innerHTML = (s.log || []).slice(0, 5).map((l) => {
+    const what = l.ok ? `sent${l.via === "template" ? " (template)" : ""}`
+      : l.window_closed ? "blocked: you have not messaged us in 24 hours" : `failed (${PT.esc(l.reason || "")})`;
+    return `<li class="${l.ok ? "" : "bad"}">${PT.esc(new Date(l.at).toLocaleString("en-GB"))}: ${what}, ${l.count} facilit${l.count === 1 ? "y" : "ies"}</li>`;
+  }).join("");
+}
+
+async function loadAlerts(lga) {
+  try { renderAlerts(await PT.api(`/api/alerts/${encodeURIComponent(lga)}`)); }
+  catch (e) { $("#alert-explain").textContent = e.message; }
+}
+
+async function alertAction(action, body) {
+  const lga = $("#lga-select").value;
+  if (action === "unsubscribe" && !confirm(`Stop WhatsApp alerts for ${lga}?`)) return;
+  const btns = document.querySelectorAll("#alert-panel button");
+  btns.forEach((b) => (b.disabled = true));
+  try {
+    const s = await PT.api(`/api/alerts/${encodeURIComponent(lga)}/${action}`, { method: "POST", body: body || {} });
+    renderAlerts({ ...s, urgent_now: s.urgent_now ?? s.check?.urgent_now ?? 0 });
+    if (action === "unsubscribe") PT.toast("Alerts turned off."); else alertCheckToast(s.check);
+    loadAlerts(lga);
+  } catch (e) { PT.toast(e.message); }
+  btns.forEach((b) => (b.disabled = false));
 }
 
 async function sendWhatsAppBrief() {
@@ -95,6 +172,7 @@ async function load() {
   const capacity = Number($("#capacity").value) || 12;
   $("#lga-title").textContent = `Officer list — ${lga}`;
   history.replaceState(null, "", `?lga=${encodeURIComponent(lga)}`);
+  loadAlerts(lga);
   $("#export-csv").href = `${window.PHC_API || ""}/api/export.csv${PT.qs({ lga })}`;
   $("#cards").innerHTML = `<div class="empty-note">Loading…</div>`;
   let data;

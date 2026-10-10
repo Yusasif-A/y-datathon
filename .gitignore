@@ -12,3 +12,7 @@ phc_triage/data/**/*.csv
 !phc_triage/data/baseline/reports.csv
 !phc_triage/data/baseline/stock_reports.csv
 phc_triage/data/**/preview.xlsx
+phc_triage/backend/data/alert_contacts.json
+phc_triage/backend/data/alert_state.json
+.firebase/
+.vscode/
