@@ -3,9 +3,9 @@
   "note": "All reporting, stock and outcome data is synthetic. Facility locations, LGAs, wards, types and settlement types are real (GRID3 v3.0); names are neutral labels.",
   "scenario": "benign_silence",
   "seed": 42,
-  "config_hash": "6e53283af922",
-  "generated_at": "2026-10-10T16:28:16+00:00",
-  "runtime_seconds": 13.0,
+  "config_hash": "2fca93f1c748",
+  "generated_at": "2026-10-10T17:10:31+00:00",
+  "runtime_seconds": 16.1,
   "summary": {
     "facilities": 1537,
     "lgas": 37,
@@ -23,26 +23,26 @@
     "periods": "202201-202512",
     "on_time": 0.651,
     "late": 0.149,
-    "missing": 0.2,
-    "fail_any": 0.674,
-    "fail_medicine": 0.501,
-    "fail_vaccine": 0.329,
-    "fail_staff": 0.01,
-    "fail_closed": 0.065,
-    "fail_next12": 0.841,
-    "fail_serious": 0.343,
-    "fail_serious_next12": 0.512,
+    "missing": 0.199,
+    "fail_any": 0.479,
+    "fail_medicine": 0.295,
+    "fail_vaccine": 0.357,
+    "fail_staff": 0.006,
+    "fail_closed": 0.05,
+    "fail_next12": 0.591,
+    "fail_serious": 0.271,
+    "fail_serious_next12": 0.344,
     "silence_causes": {
-      "lga_backlog": 6381,
-      "entry_delay": 3789,
-      "real_problem": 2981,
-      "closure": 1317,
-      "chronic": 840
+      "lga_backlog": 6671,
+      "entry_delay": 5169,
+      "real_problem": 1602,
+      "chronic": 1079,
+      "closure": 972
     },
-    "silence_insecure_share": 0.186,
-    "stock_participants": 460,
-    "tuned_b0": 2.377,
-    "tuned_d0": -2.2871,
+    "silence_insecure_share": 0.153,
+    "stock_participants": 426,
+    "tuned_b0": 2.2349,
+    "tuned_d0": -2.3089,
     "state_lead_time_mean": {
       "Gombe": 1.08,
       "Kano": 1.55,
@@ -53,12 +53,12 @@
       "Kano": 0.867,
       "Oyo": 0.6
     },
-    "supply_waves": 7
+    "supply_waves": 9
   },
   "sanity_checks": [
     {
       "check": "Reporting rate (received on time or late)",
-      "value": 0.8,
+      "value": 0.801,
       "target": "75%-85%",
       "passed": true
     },
@@ -76,7 +76,7 @@
     },
     {
       "check": "Rural reporting rate below urban by",
-      "value": 0.045,
+      "value": 0.043,
       "target": ">= 5%",
       "passed": false
     },
@@ -88,16 +88,16 @@
     },
     {
       "check": "Tracer availability (facility-item-months in stock at month end)",
-      "value": 0.69,
+      "value": 0.742,
       "target": "60%-75%",
       "passed": true
     },
     {
       "check": "Tracer availability by state",
       "value": {
-        "Gombe": 0.717,
-        "Kano": 0.764,
-        "Oyo": 0.579
+        "Gombe": 0.764,
+        "Kano": 0.774,
+        "Oyo": 0.685
       },
       "target": "each 45%-85%, and they differ",
       "passed": true
@@ -105,13 +105,13 @@
     {
       "check": "Stockouts lower related volumes (correlation)",
       "value": {
-        "ANC_visits": -0.443,
-        "Facility_deliveries": -0.404,
-        "Penta3_doses": -0.439,
-        "BCG_doses": -0.433,
-        "FP_acceptors": -0.431,
-        "OPD_visits": -0.481,
-        "Malaria_treated": -0.483
+        "ANC_visits": -0.489,
+        "Facility_deliveries": -0.456,
+        "Penta3_doses": -0.49,
+        "BCG_doses": -0.485,
+        "FP_acceptors": -0.488,
+        "OPD_visits": -0.504,
+        "Malaria_treated": -0.5
       },
       "target": "all clearly negative (< -0.05)",
       "passed": true
@@ -121,7 +121,7 @@
       "value": {
         "counts_ok": true,
         "facility_months_with_rows": true,
-        "blank_values": 48386
+        "blank_values": 47826
       },
       "target": "pass",
       "passed": true
@@ -134,18 +134,18 @@
     },
     {
       "check": "Runtime (seconds)",
-      "value": 13.0,
+      "value": 16.1,
       "target": "< 120",
       "passed": true
     }
   ],
   "file_hashes": {
     "facilities.csv": "e4bd07b7f94dad3d",
-    "reports.csv": "00a33d3884413436",
-    "stock_reports.csv": "05b60ccef28fdb6c",
-    "truth_facility_month.csv": "bd76721cb3f3e0a3",
-    "truth_silence_events.csv": "61e46a465973ba0e",
-    "truth_lga_month.csv": "d541a2b9dad8ee7d"
+    "reports.csv": "a0f47382c3b2013c",
+    "stock_reports.csv": "30ed3b9663e9a6e1",
+    "truth_facility_month.csv": "7f6988ea757b56fc",
+    "truth_silence_events.csv": "d9eca3b2c694841d",
+    "truth_lga_month.csv": "9e5b7c49f33a4d1f"
   },
   "parameters": {
     "run": {
@@ -229,8 +229,8 @@
         "code": "ACT",
         "name": "Antimalarial",
         "demand": 40,
-        "reorder": 1.0,
-        "target": 3,
+        "reorder": 2.0,
+        "target": 4,
         "expiry": 0.01,
         "season_peak": [
           6,
@@ -244,8 +244,8 @@
         "code": "OXY",
         "name": "Maternal drug",
         "demand": 6,
-        "reorder": 1.0,
-        "target": 3,
+        "reorder": 2.0,
+        "target": 4,
         "expiry": 0.01,
         "season_peak": []
       },
@@ -253,8 +253,8 @@
         "code": "FP",
         "name": "Family-planning commodity",
         "demand": 15,
-        "reorder": 1.5,
-        "target": 3,
+        "reorder": 2.0,
+        "target": 4,
         "expiry": 0.01,
         "season_peak": []
       },
@@ -262,7 +262,7 @@
         "code": "VAC",
         "name": "Vaccine",
         "demand": 20,
-        "reorder": 1.5,
+        "reorder": 2.0,
         "target": 3,
         "expiry": 0.05,
         "season_peak": [],
@@ -272,8 +272,8 @@
         "code": "ORS",
         "name": "Oral rehydration",
         "demand": 12,
-        "reorder": 1.0,
-        "target": 3,
+        "reorder": 2.0,
+        "target": 4,
         "expiry": 0.01,
         "season_peak": [
           3,
@@ -295,7 +295,14 @@
         0.95
       ],
       "fill_noise_sd": 0.15,
-      "facility_fill_sd": 0.35,
+      "facility_fill_sd": 0.15,
+      "disruption_rate": 0.05,
+      "disruption_sd": 0.9,
+      "disruption_months": [
+        3,
+        8
+      ],
+      "disruption_fill_mult": 0.05,
       "remote_fill_penalty_per_10km": 0.04,
       "vaccine_spoil_fridge_down": 0.5,
       "utilisation_drop": 0.15,
@@ -357,7 +364,7 @@
       "late_target_rate": 0.15,
       "c": 0.0,
       "b_rec": 0.6,
-      "b_conn": 0.5,
+      "b_conn": 0.6,
       "b_work": 0.5,
       "lga_effect_sd": 0.6,
       "state_effect_sd": 0.4,

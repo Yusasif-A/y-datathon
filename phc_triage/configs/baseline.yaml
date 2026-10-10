@@ -58,14 +58,15 @@ facilities:
   insecurity_lga_sd: 0.15         # [Assumed]
 
 items:
-  # [Assumed] all values (spec 6.1). season_peak = months with higher demand.
-  - {code: ACT,   name: Antimalarial,              demand: 40, reorder: 1.0, target: 3, expiry: 0.01, season_peak: [6, 7, 8, 9, 10]}
-  - {code: OXY,   name: Maternal drug,             demand: 6,  reorder: 1.0, target: 3, expiry: 0.01, season_peak: []}
-  - {code: FP,    name: Family-planning commodity, demand: 15, reorder: 1.5, target: 3, expiry: 0.01, season_peak: []}
-  - {code: VAC,   name: Vaccine,                   demand: 20, reorder: 1.5, target: 3, expiry: 0.05, season_peak: [], vaccine: true}
-  # VAC reorder/target raised from the spec's 1.0/2: with 1-2 month lead times the spec values left
-  # vaccine in stock only ~49% of months, an artifact of the placeholders [Assumed]
-  - {code: ORS,   name: Oral rehydration,          demand: 12, reorder: 1.0, target: 3, expiry: 0.01, season_peak: [3, 4, 5, 6]}
+  # [Assumed] demand values from spec 6.1. Reorder/target raised from the spec's placeholders
+  # (1.0 / 2-3 months): with 1-2 month lead times those let facilities run dry on every routine
+  # cycle, so stockouts flickered monthly. Reordering at 2 months of stock covers the lead time;
+  # stockouts now come mainly from real disruptions (funding delays, supply waves, broken chains).
+  - {code: ACT,   name: Antimalarial,              demand: 40, reorder: 2.0, target: 4, expiry: 0.01, season_peak: [6, 7, 8, 9, 10]}
+  - {code: OXY,   name: Maternal drug,             demand: 6,  reorder: 2.0, target: 4, expiry: 0.01, season_peak: []}
+  - {code: FP,    name: Family-planning commodity, demand: 15, reorder: 2.0, target: 4, expiry: 0.01, season_peak: []}
+  - {code: VAC,   name: Vaccine,                   demand: 20, reorder: 2.0, target: 3, expiry: 0.05, season_peak: [], vaccine: true}
+  - {code: ORS,   name: Oral rehydration,          demand: 12, reorder: 2.0, target: 4, expiry: 0.01, season_peak: [3, 4, 5, 6]}
 season_multiplier: 1.35           # [Assumed] demand in peak months
 
 supply:
@@ -74,8 +75,15 @@ supply:
   lead_time_shape: 2.0            # [Assumed]
   fill_rate: [0.60, 0.95]         # [Assumed] state-level
   fill_noise_sd: 0.15             # [Assumed] order-to-order variation in fill
-  facility_fill_sd: 0.35          # [Assumed] facility-level supply reliability (lognormal); without it every
-                                  # facility fails equally often, unlike real availability data
+  facility_fill_sd: 0.15          # [Assumed] facility-level variation in routine fill (lognormal)
+  # Supply disruptions [Assumed]: the resupply chain breaks for months. Without
+  # them stock flickered in/out every month (ACT stockout spells ~1.5 months,
+  # no memory), which real stockouts do not do. Weak/remote facilities break
+  # more often, which also keeps facilities different from each other.
+  disruption_rate: 0.05           # per facility-month, before facility variation
+  disruption_sd: 0.9              # facility-level variation (lognormal)
+  disruption_months: [3, 8]
+  disruption_fill_mult: 0.05      # almost nothing arrives while disrupted
   remote_fill_penalty_per_10km: 0.04  # [Assumed] facilities far from the LGA HQ are resupplied less reliably
   vaccine_spoil_fridge_down: 0.50 # spec 6.2
   utilisation_drop: 0.15          # spec 6.2
@@ -114,7 +122,7 @@ reporting:
                                   # 64% timeliness Data for Impact reported for five states (2020)
   c: 1.0                          # [Assumed] link between distress and reporting; swept
   b_rec: 0.6
-  b_conn: 0.5
+  b_conn: 0.6                     # [Assumed] spec start 0.5 (range 0-1.5); raised so rural reports >= 5 points less
   b_work: 0.5
   lga_effect_sd: 0.6
   state_effect_sd: 0.4            # [Reported]

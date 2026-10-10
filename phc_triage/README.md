@@ -51,8 +51,13 @@ Decisions that depart from the spec (each is noted where it is set):
 - **Reporting:** 80% is the *received* rate (as DHIS2 counts it); on time is
   ~65%, close to the 64% timeliness reported for five states.
 - **Insecure-area threshold 0.7** (spec 0.5 flagged 91% of Gombe as "never visit").
-- Lead times 1–2 months, facility-level supply reliability, and a higher
-  vaccine reorder point (spec placeholders produced unrealistic stockouts).
+- **Sticky stockouts.** With the spec's placeholder supply settings, stock
+  flickered in and out every month (an ACT stockout had no memory; spells
+  lasted ~1.5 months), so trouble this month said nothing about next month.
+  Now: reordering on stock + deliveries on the way, a reorder point that
+  covers the 1–2 month lead time, and multi-month supply disruptions that hit
+  weak and remote facilities more often. ACT stockouts now last ~3 months and
+  continue month to month 70% of the time.
 
 ## Run it (original stimulate-data pipeline)
 

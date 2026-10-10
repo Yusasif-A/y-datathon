@@ -50,7 +50,14 @@ def simulate(fac: pd.DataFrame, lgas: pd.DataFrame, cfg: dict, rng: np.random.Ge
     # Facility-level reliability [Assumed]: some facilities are reliably
     # supplied, others chronically short; remote ones a little worse.
     fac_fill = rng.lognormal(0, sup["facility_fill_sd"], F)
-    fac_fill *= np.clip(1 - sup["remote_fill_penalty_per_10km"] * fac.dist_lga_hq_km.values / 10, 0.5, 1)
+    remote = np.clip(1 - sup["remote_fill_penalty_per_10km"] * fac.dist_lga_hq_km.values / 10, 0.5, 1)
+    fac_fill *= remote
+    # Supply disruptions [Assumed]: a facility's resupply chain breaks for
+    # several months (missed collections, transport, an unpaid supplier).
+    # Weak and remote facilities break more often. This is what makes real
+    # stockouts last for months instead of flickering month to month.
+    disrupt_rate = sup["disruption_rate"] * rng.lognormal(0, sup["disruption_sd"], F) / remote
+    disrupted = _spells(rng, F, T, np.clip(disrupt_rate, 0, 0.5), sup["disruption_months"])
 
     # ---- shocks (spec 6.3) ------------------------------------------------
     quarter_start = (np.arange(T) % 3) == 0
@@ -117,7 +124,6 @@ def simulate(fac: pd.DataFrame, lgas: pd.DataFrame, cfg: dict, rng: np.random.Ge
 
     stock = mean_demand * rng.uniform(reorder, target, (F, I))
     pending = np.zeros((F, I, pad))
-    outstanding_until = np.full((F, I), -1)
     util = np.ones(F)
     streak = np.zeros(F, int)
     staff_base = np.ones(F)
@@ -144,18 +150,22 @@ def simulate(fac: pd.DataFrame, lgas: pd.DataFrame, cfg: dict, rng: np.random.Ge
         loss = np.where(is_vac[None, :] & fridge_blocked[:, None], sup["vaccine_spoil_fridge_down"], expiry[None, :])
         stock = stock * (1 - loss)
 
-        need = (stock < reorder * mean_demand) & (outstanding_until < t)
+        # Reorder on inventory position (stock + deliveries already on the
+        # way), the standard (s, S) rule [Interp: the spec does not say].
+        on_order = pending[:, :, t + 1:].sum(axis=2)
+        position = stock + on_order
+        need = position < reorder * mean_demand
         if need.any():
             ff, ii = np.nonzero(need)
             s_of = s_idx[ff]
             fill = np.clip(fill_rate[s_of] * fac_fill[ff] * rng.normal(1, sup["fill_noise_sd"], len(ff)), 0, 1)
             fill *= np.where(funding[s_of, t], sh["funding_fill_mult"], 1.0) * wave_mult[ff, t]
+            fill *= np.where(disrupted[ff, t], sup["disruption_fill_mult"], 1.0)
             m = lead_mean[s_of]
             lead = 1 + np.rint(rng.gamma(sup["lead_time_shape"], np.maximum(m - 1, 1e-9) / sup["lead_time_shape"]))
             arrive = np.minimum(t + lead.astype(int), pad - 1)
-            qty = np.maximum(target[ii] * mean_demand[ff, ii] - stock[ff, ii], 0) * fill
+            qty = np.maximum(target[ii] * mean_demand[ff, ii] - position[ff, ii], 0) * fill
             np.add.at(pending, (ff, ii, arrive), qty)
-            outstanding_until[ff, ii] = arrive
 
         stock_end[:, :, t] = stock
 
@@ -186,4 +196,5 @@ def simulate(fac: pd.DataFrame, lgas: pd.DataFrame, cfg: dict, rng: np.random.Ge
         "utilisation": out["utilisation"], "insecurity_lga": insecurity, "funding_lga": funding[lga_state],
         "strike_lga": strike[lga_state], "lead_mean": dict(zip(states, lead_mean.round(2))),
         "fill_rate": dict(zip(states, fill_rate.round(3))), "supply_waves": len(wave_events),
+        "disrupted": disrupted,
     }
