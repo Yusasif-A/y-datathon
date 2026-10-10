@@ -33,7 +33,16 @@
   </div>
 
   <div id="banners"></div>
+  <h2 class="list-head">To check this week <span class="faint" id="snoozed-note"></span></h2>
   <div class="card-list" id="cards"><div class="empty-note">Loading…</div></div>
+  <section id="checking-section" hidden>
+    <h2 class="list-head">Waiting for an answer <span class="faint">— record the result when it comes in</span></h2>
+    <div class="card-list" id="checking"></div>
+  </section>
+  <section id="follow-up-section" hidden>
+    <h2 class="list-head">Follow-up <span class="faint">— confirmed problems; record Cleared once resolved</span></h2>
+    <div class="card-list" id="follow-up"></div>
+  </section>
 </main>
 <script src="/static/js/config.js"></script>
 <script src="/static/js/app.js"></script>
@@ -96,11 +105,18 @@ async function load() {
   $("#k-flagged").textContent = PT.num(data.flagged_this_week);
   $("#k-alerts").textContent = PT.num(data.lga_wide_alerts);
   $("#banners").innerHTML = (data.warning_banners || [])
-    .map((a) => `<div class="banner ${a.cause === "insecure_silence" ? "critical" : ""}">⚠️ ${PT.esc(a.message)}</div>`).join("");
+    .map((a) => `<div class="banner ${a.cause === "insecure" ? "critical" : ""}">⚠️ ${PT.esc(a.message)}</div>`).join("");
+  $("#snoozed-note").textContent = data.snoozed_count
+    ? `— ${data.snoozed_count} recently checked or overridden facilit${data.snoozed_count === 1 ? "y is" : "ies are"} snoozed` : "";
   $("#cards").innerHTML = data.cards.length
     ? data.cards.map(PT.cardHtml).join("")
-    : `<div class="empty-note">Nothing flagged for this LGA right now.</div>`;
-  PT.bindCardActions($("#cards"));
+    : `<div class="empty-note">Nothing left to check for this LGA right now.</div>`;
+  for (const [key, el, section] of [["checking", "#checking", "#checking-section"], ["follow_up", "#follow-up", "#follow-up-section"]]) {
+    const list = data[key] || [];
+    $(section).hidden = !list.length;
+    $(el).innerHTML = list.map((c) => PT.cardHtml({ ...c, rank: "·" })).join("");
+  }
+  for (const el of ["#cards", "#checking", "#follow-up"]) PT.bindCardActions($(el), load);
 }
 
 boot();

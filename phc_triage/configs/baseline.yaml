@@ -1,0 +1,202 @@
+# PHC Triage simulator: baseline scenario (Simulator Specification v0.2).
+# ALL OUTPUT IS SYNTHETIC.
+#
+# Every parameter carries its status from the spec:
+#   [Documented] taken from a source we read
+#   [Reported]   from a news item or summary; verify before citing
+#   [Assumed]    our reasoned placeholder; do not present as fact
+#   [Interp]     the spec leaves this open; our interpretation (see README)
+#   [Real]       taken directly from a real dataset (GRID3 v3.0)
+#   [NMIS]       calibrated to NMIS 2014 facility data (inputs/nmis_calibration.json)
+# Other scenarios inherit everything here and override only what they list.
+
+run:
+  seed: 42
+  months: 48
+  start_period: 202201
+  synthetic_label: true
+
+geography:
+  use_real_points: true           # [Real] GRID3 v3.0 public primary facilities (inputs/grid3_public_primary.csv)
+  facilities_file: inputs/grid3_public_primary.csv
+  # Whole LGAs are sampled (an officer covers a whole LGA) until each state
+  # reaches about its target count. Contrasting zones (spec 1).
+  states:
+    - {name: Oyo,   zone: South West, target_facilities: 500}
+    - {name: Kano,  zone: North West, target_facilities: 600}
+    - {name: Gombe, zone: North East, target_facilities: 400}
+  urban_settlement_types: ["Built-up Area"]   # [Real] GRID3 settlement type -> urban flag
+  level2_types: ["Primary Health Center", "Primary Health Clinic", "Health Center"]  # [Interp] type -> Level 2 proxy
+  catchment_method: lognormal     # spec 3.1 fallback; WorldPop raster not downloaded yet
+  catchment_median: 6000          # [Assumed]
+  catchment_sigma: 0.55           # [Assumed]
+  catchment_urban_mult: 1.3       # [Assumed] built-up areas serve more people
+
+facilities:
+  # Power: grid connection from NMIS (urban 65%, rural 18%); the spec's
+  # reliable / unreliable / none split of that is [Assumed].
+  grid_power: {urban: 0.65, rural: 0.18}          # [NMIS]
+  reliable_if_grid: 0.50                          # [Assumed]
+  none_if_no_grid: 0.50                           # [Assumed] rest have generator/solar = "unreliable"
+  connectivity_good: {urban: 0.80, rural: 0.35}   # [Assumed]
+  connectivity_none: {urban: 0.02, rural: 0.20}   # [Assumed] rest are "poor"
+  records_officer: 0.75           # [Reported]
+  # Staffing: national median 0.235 [Reported]; urban/rural gap from NMIS
+  # (median clinical staff 4 urban vs 1 rural), softened because NMIS mixes
+  # facility types.
+  hr_compliance_median: {urban: 0.33, rural: 0.19}  # [NMIS] around the [Reported] 0.235
+  hr_compliance_range: [0.10, 0.60]
+  hr_compliance_sigma: 0.35
+  hr_level2_bonus: 0.05           # [Assumed] Level 2 staffed better
+  # Vaccine fridge: overall 70% working [Reported, 2022 audit], with the
+  # power link from NMIS (fridge 35% with grid vs 9% without -> odds ratio 5.4).
+  fridge_logit_base: 0.40         # [Interp] solved so the overall share is about 70%
+  fridge_grid_effect: 1.69        # [NMIS] log odds ratio
+  bhcpf_supported: 0.26           # [Reported] about 8,300 of 31,800 PHCs
+  bhcpf_level2_mult: 1.8          # [Assumed] BHCPF facilities are more often Level 2
+  insecurity_by_zone: {North East: 0.6, North West: 0.5, default: 0.15}  # [Assumed]
+  insecurity_lga_sd: 0.15         # [Assumed]
+
+items:
+  # [Assumed] demand values from spec 6.1. Reorder/target raised from the spec's placeholders
+  # (1.0 / 2-3 months): with 1-2 month lead times those let facilities run dry on every routine
+  # cycle, so stockouts flickered monthly. Reordering at 2 months of stock covers the lead time;
+  # stockouts now come mainly from real disruptions (funding delays, supply waves, broken chains).
+  - {code: ACT,   name: Antimalarial,              demand: 40, reorder: 2.0, target: 4, expiry: 0.01, season_peak: [6, 7, 8, 9, 10]}
+  - {code: OXY,   name: Maternal drug,             demand: 6,  reorder: 2.0, target: 4, expiry: 0.01, season_peak: []}
+  - {code: FP,    name: Family-planning commodity, demand: 15, reorder: 2.0, target: 4, expiry: 0.01, season_peak: []}
+  - {code: VAC,   name: Vaccine,                   demand: 20, reorder: 2.0, target: 3, expiry: 0.05, season_peak: [], vaccine: true}
+  - {code: ORS,   name: Oral rehydration,          demand: 12, reorder: 2.0, target: 4, expiry: 0.01, season_peak: [3, 4, 5, 6]}
+season_multiplier: 1.35           # [Assumed] demand in peak months
+
+supply:
+  lead_time_mean: [1.0, 2.0]      # [Assumed] state-level mean, months (shifted gamma); spec said 1-3, narrowed
+                                  # because PHCs are resupplied roughly monthly from the LGA store
+  lead_time_shape: 2.0            # [Assumed]
+  fill_rate: [0.60, 0.95]         # [Assumed] state-level
+  fill_noise_sd: 0.15             # [Assumed] order-to-order variation in fill
+  facility_fill_sd: 0.15          # [Assumed] facility-level variation in routine fill (lognormal)
+  # Supply disruptions [Assumed]: the resupply chain breaks for months. Without
+  # them stock flickered in/out every month (ACT stockout spells ~1.5 months,
+  # no memory), which real stockouts do not do. Weak/remote facilities break
+  # more often, which also keeps facilities different from each other.
+  disruption_rate: 0.05           # per facility-month, before facility variation
+  disruption_sd: 0.9              # facility-level variation (lognormal)
+  disruption_months: [3, 8]
+  disruption_fill_mult: 0.05      # almost nothing arrives while disrupted
+  remote_fill_penalty_per_10km: 0.04  # [Assumed] facilities far from the LGA HQ are resupplied less reliably
+  vaccine_spoil_fridge_down: 0.50 # spec 6.2
+  utilisation_drop: 0.15          # spec 6.2
+  utilisation_recovery: 0.05      # [Assumed] "recovering slowly"
+  utilisation_floor: 0.50         # [Assumed]
+
+shocks:
+  funding_delay_per_quarter: 0.30 # [Assumed]
+  funding_delay_months: [1, 3]
+  funding_fill_mult: 0.40
+  supply_wave: 0.05               # [Assumed] per state per month
+  supply_wave_share: 0.30
+  supply_wave_months: [1, 2]
+  supply_wave_fill_mult: 0.50
+  strike: 0.02                    # [Assumed] per state per month
+  strike_months: [1, 2]
+  strike_staff_mult: 0.50
+  insecurity_event_base: 0.005    # [Assumed] x exposure x 10 per LGA-month
+  insecurity_months: [1, 6]
+  insecurity_closure_prob: 0.50
+  insecurity_staff_mult: 0.50
+  power_outage: {reliable: 0.03, unreliable: 0.10, none: 0.25}  # [Assumed]; "none" is [Interp]
+  fridge_failure: 0.015           # [Assumed]
+  fridge_repair_months: [1, 4]
+  fridge_repair_rural_extra: 2    # [Assumed] "longer if rural"
+  fridge_initial_repair_months: [3, 24]  # [Interp] fridges broken at start
+  staff_loss: 0.015               # [Assumed]
+  staff_loss_size: 0.15
+  hiring_months: [3, 9]
+  closure: 0.001                  # [Assumed] permanent
+
+reporting:
+  national_target_rate: 0.80      # [Documented] national reporting rate 2021; DHIS2 counts reports RECEIVED
+                                  # (on time or late), so b0 is tuned to the received rate [Interp]
+  late_target_rate: 0.15          # [Interp] d0 tuned to this; on-time then lands near 65%, close to the
+                                  # 64% timeliness Data for Impact reported for five states (2020)
+  c: 1.0                          # [Assumed] link between distress and reporting; swept
+  b_rec: 0.6
+  b_conn: 0.6                     # [Assumed] spec start 0.5 (range 0-1.5); raised so rural reports >= 5 points less
+  b_work: 0.5
+  lga_effect_sd: 0.6
+  state_effect_sd: 0.4            # [Reported]
+  facility_habit_sd: 0.8
+  d_conn: 0.4
+  d_work: 0.4
+  late_months: [1, 3]
+  chronic_share: 0.10
+  chronic_habit: -2.0
+  lga_backlog_rate: 0.05
+  backlog_late_months: [1, 2]
+  backlog_missing_share: 0.30
+  closed_zero_form: 0.20
+
+data_elements:
+  # [Assumed] base rate per 1,000 people per month (spec 7.4); item = related tracer
+  - {code: ANC_visits,          rate: 12, item: OXY}
+  - {code: ANC_4th_visit,       rate: 4,  item: null}
+  - {code: Facility_deliveries, rate: 3,  item: OXY}
+  - {code: Penta3_doses,        rate: 6,  item: VAC, immunisation: true}
+  - {code: BCG_doses,           rate: 5,  item: VAC, immunisation: true}
+  - {code: FP_acceptors,        rate: 8,  item: FP}
+  - {code: OPD_visits,          rate: 80, item: ACT}
+  - {code: Malaria_treated,     rate: 25, item: ACT}
+availability_k: 0.8
+fridge_immunisation_k: 0.7
+count_dispersion: 5
+
+noise:
+  under_reporting_share: 0.25     # [Reported]
+  under_reporting_range: [0.40, 1.00]
+  incomplete_base: 0.05           # [Reported]
+  incomplete_workload: 0.10
+  zero_left_blank: 0.30           # [Reported]
+  digit_preference: 0.10          # [Assumed]
+
+stock_reporting:
+  concentrated_state: Kano        # [Reported] a few states produced most stock reports
+  concentrated_state_share: 0.60
+  other_state_share: 0.10
+  report_probability: 0.70
+  other_items_reported: 2
+  stock_noise_sd: 0.15
+
+labels:
+  serious_min_medicines: 2        # team decision: forecast target is "serious trouble" (see labels.py)
+  stockout_threshold: 0.30
+  staff_threshold: 0.50
+  forecast_horizon_months: [1, 2]
+  distress_problem: 0.40          # silence cause "real_problem" (spec 8.2)
+  chronic_habit_below: -1.5
+  insecure_exposure: 0.70          # [Interp] spec says 0.5; with the spec's zone values that flagged 91% of Gombe and
+                                  # 46% of Kano as "never visit". 0.7 keeps it to the most exposed LGAs
+
+checks:
+  # Spec 12 sanity targets. Availability departs from the spec's 30-40% (NHFS,
+  # long essential-drug list): the tracer items are programme commodities, and
+  # NMIS shows ACT in stock at 77% and FP offered at 56% of primary facilities.
+  reporting_rate_range: [0.75, 0.85]   # received on time or late (spec "national reporting rate")
+  on_time_range: [0.55, 0.85]          # [Interp] widened: spec's 75-85% on time contradicts its own late range
+  late_range: [0.10, 0.25]
+  rural_gap_min: 0.05
+  backlog_range: [0.03, 0.07]
+  availability_range: [0.60, 0.75]          # [NMIS] agreed with the team
+  state_availability_range: [0.45, 0.85]
+  max_runtime_seconds: 120
+
+feedback:
+  k_per_lga: 5
+  random_audit_per_lga: 2
+  no_answer_share: 0.20
+  method_mix: {phone: 0.60, visit: 0.25, committee_sms: 0.15}
+  method_accuracy: {phone: 0.85, visit: 0.95, committee_sms: 0.80}
+  response_lag_days: [1, 14]
+  snooze_months: 2
+  rescore_jump: 0.20
+  retrain_every_rounds: 3

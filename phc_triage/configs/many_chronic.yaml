@@ -1,0 +1,4 @@
+# Fairness and false alarms (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+reporting:
+  chronic_share: 0.30

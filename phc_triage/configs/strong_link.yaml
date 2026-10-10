@@ -1,0 +1,4 @@
+# Upper bound (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+reporting:
+  c: 2.0

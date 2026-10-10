@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 import data_loader
 import scoring
 import simulator
+import spec_pipeline
 import train
 import whatsapp
 
@@ -45,10 +46,31 @@ _feedback_lock = threading.Lock()
 
 STATE = {}  # world, bundle, risk_table, validation, built lazily at startup
 
+# Status control (solution doc v2, section 7.4). A status records the RESULT
+# of a check the officer made; the app verifies nothing itself.
+STATUSES = ("checking", "confirmed", "cleared", "just_late", "could_not_verify")
+RESULT_STATUSES = ("confirmed", "cleared", "just_late", "could_not_verify")
+METHODS = ("phone", "visit", "committee_sms")
+PROBLEM_TYPES = ("medicine", "vaccine", "staff", "closed", "other")
+SNOOZE_DAYS = {"cleared": 45, "just_late": 45, "could_not_verify": 30}
+OVERRIDE_SNOOZE_DAYS = 30
+REFLAG_JUMP = 0.2  # a snoozed facility comes back if its trouble chance rises this much
+JUST_LATE_ALERT_COUNT = 3  # this many "just late" answers in one LGA alerts the data office
+
+
+def _migrate_entry(entry: dict) -> dict:
+    """feedback.json used to hold one flat status per facility."""
+    if "history" in entry:
+        return entry
+    history = []
+    if entry.get("status"):
+        history.append({"status": entry["status"], "at": entry.get("at"), "method": None})
+    return {"history": history, "override": None}
+
 
 def _load_feedback() -> dict:
     if FEEDBACK_PATH.exists():
-        return json.loads(FEEDBACK_PATH.read_text())
+        return {f: _migrate_entry(e) for f, e in json.loads(FEEDBACK_PATH.read_text()).items()}
     return {}
 
 
@@ -56,16 +78,30 @@ def _save_feedback(data: dict) -> None:
     FEEDBACK_PATH.write_text(json.dumps(data, indent=2))
 
 
+def _model_version() -> str:
+    """Saved with every status so a label can be traced to the model that raised the flag."""
+    w = STATE["world"]
+    model_path = spec_pipeline.BUNDLE if STATE.get("spec") else DATA_DIR / "models.joblib"
+    stamp = pd.Timestamp(model_path.stat().st_mtime, unit="s").strftime("%Y%m%d-%H%M") if model_path.exists() else "unsaved"
+    return f"{w.get('source', 'simulator')}-{w.get('seed')}-{stamp}"
+
+
 def _refresh_risk_table():
-    STATE["risk_table"] = scoring.build_risk_table(STATE["world"], STATE["bundle"])
-    STATE["cluster_alerts"] = scoring.cluster_alerts(STATE["world"], STATE["risk_table"])
+    build = spec_pipeline.build_risk_table if STATE.get("spec") else scoring.build_risk_table
+    STATE["risk_table"] = build(STATE["world"], STATE["bundle"])
+    min_frac = spec_pipeline.CLUSTER_MIN_FRAC if STATE.get("spec") else 0.4
+    STATE["cluster_alerts"] = scoring.cluster_alerts(STATE["world"], STATE["risk_table"], min_frac)
 
 
 def _bootstrap():
     model_path = DATA_DIR / "models.joblib"
     world_path = DATA_DIR / "train_world.joblib"
     validation_path = DATA_DIR / "validation.json"
-    if model_path.exists() and world_path.exists() and validation_path.exists():
+    STATE["spec"] = spec_pipeline.available()
+    if STATE["spec"]:
+        logger.info("Loading the spec-built world (phc_triage/data/baseline) and models (phc_triage/models)")
+        STATE["world"], STATE["bundle"], STATE["validation"] = spec_pipeline.load()
+    elif model_path.exists() and world_path.exists() and validation_path.exists():
         logger.info("Loading cached models + world + validation from data/")
         STATE["bundle"] = joblib.load(model_path)
         STATE["world"] = joblib.load(world_path)
@@ -76,9 +112,10 @@ def _bootstrap():
         STATE["bundle"] = result["bundle"]
         STATE["world"] = result["world"]
         STATE["validation"] = result["validation"]
+    STATE["model_version"] = _model_version()
     _refresh_risk_table()
     STATE["lga_phones"] = data_loader.lga_coordinator_phones(STATE["world"].get("seed", "A")) \
-        if data_loader.available() else {}
+        if data_loader.available() and not STATE["spec"] else {}
     if not FEEDBACK_PATH.exists():
         _save_feedback({})
     logger.info("PHC Triage ready — %d facilities, %d LGAs", len(STATE["world"]["facilities"]), len(STATE["world"]["lgas"]))
@@ -105,28 +142,92 @@ def _nullable_object_col(series: pd.Series) -> pd.Series:
     return s.where(s.notna(), None)
 
 
+def _days_since(iso: str | None, now: pd.Timestamp) -> float:
+    if not iso:
+        return float("inf")
+    return (now - pd.Timestamp(iso)).total_seconds() / 86400
+
+
+def _override_active(entry: dict, now: pd.Timestamp) -> bool:
+    ov = entry.get("override")
+    return bool(ov) and _days_since(ov.get("at"), now) < OVERRIDE_SNOOZE_DAYS
+
+
+def _queue(entry: dict, trouble_prob: float, now: pd.Timestamp) -> str:
+    """Which list a facility belongs on: to_do, checking, follow_up or snoozed."""
+    if _override_active(entry, now):
+        return "snoozed"
+    history = entry.get("history") or []
+    if not history:
+        return "to_do"
+    last = history[-1]
+    status = last["status"]
+    if status == "checking":
+        return "checking"
+    if status == "confirmed":
+        return "follow_up"
+    snooze = SNOOZE_DAYS.get(status)
+    if snooze and _days_since(last.get("at"), now) < snooze:
+        # A strong new signal brings a cleared facility back early.
+        at_flag = last.get("trouble_prob_at_flag")
+        if at_flag is not None and trouble_prob - at_flag >= REFLAG_JUMP:
+            return "to_do"
+        return "snoozed"
+    return "to_do"
+
+
 def _risk_with_feedback() -> pd.DataFrame:
     fb = _load_feedback()
+    now = pd.Timestamp.utcnow()
     rt = STATE["risk_table"].copy()
-    rt["officer_status"] = _nullable_object_col(rt["facility_id"].map(lambda f: (fb.get(f) or {}).get("status")))
-    rt["visited"] = rt["facility_id"].map(lambda f: bool((fb.get(f) or {}).get("visited")))
-    rt["override_tag"] = _nullable_object_col(rt["facility_id"].map(lambda f: (fb.get(f) or {}).get("override_tag")))
-    rt["tag"] = rt.apply(lambda r: r["override_tag"] if r["override_tag"] else r["tag"], axis=1)
+    entries = rt["facility_id"].map(lambda f: fb.get(f) or {})
+    last = entries.map(lambda e: (e.get("history") or [None])[-1] or {})
+    rt["officer_status"] = _nullable_object_col(last.map(lambda r: r.get("status")))
+    rt["check_method"] = _nullable_object_col(last.map(lambda r: r.get("method")))
+    rt["queue"] = [_queue(e, float(p), now) for e, p in zip(entries, rt["trouble_prob"])]
+    rt["override_active"] = entries.map(lambda e: _override_active(e, now))
     return rt
 
 
-def _row_to_card(r: pd.Series) -> dict:
+def _row_to_card(r: pd.Series, rank: int | None = None) -> dict:
     return {
-        "rank": int(r["rank"]), "facility_id": r["facility_id"], "name": r["name"], "lga": r["lga"],
+        "rank": int(rank if rank is not None else r["rank"]), "state_rank": int(r["rank"]),
+        "facility_id": r["facility_id"], "name": r["name"], "lga": r["lga"],
         "tag": str(r["tag"]), "population": int(r["population"]), "people_served_label": f"About {int(round(r['population'], -2)):,}",
         "reason": r["reason"], "suggested_action": r["suggested_action"],
         "silence_type": r["silence_label"], "trouble_prob": round(float(r["trouble_prob"]), 3),
         "trouble_uncertainty": round(float(r["trouble_uncertainty"]), 3),
         "priority": round(float(r["priority"]), 4), "months_since_last_report": int(r["months_since_last_report"]),
         "distance_km": float(r["distance_km"]), "lat": float(r["lat"]), "lon": float(r["lon"]),
-        "officer_status": r.get("officer_status"), "visited": bool(r.get("visited", False)),
+        "low_confidence": bool(r["low_confidence"]),
+        "officer_status": r.get("officer_status"), "check_method": r.get("check_method"), "queue": r["queue"],
         "sample_data": True,
     }
+
+
+def _to_do(g: pd.DataFrame, capacity: int) -> pd.DataFrame:
+    """Top `capacity` facilities still needing a check. Low-confidence
+    facilities are capped so thin data cannot flood the list."""
+    todo = g[g["queue"] == "to_do"].sort_values("priority", ascending=False)
+    low_cap = max(1, capacity // 4)
+    keep = todo[~todo["low_confidence"]].index.union(todo[todo["low_confidence"]].head(low_cap).index)
+    return todo.loc[todo.index.isin(keep)].head(capacity)
+
+
+def _just_late_alerts(lga: str) -> list:
+    """Several 'just late' answers in one LGA point to a data-entry backlog."""
+    fb = _load_feedback()
+    now = pd.Timestamp.utcnow()
+    rt = STATE["risk_table"]
+    ids = rt.loc[rt["lga"] == lga, "facility_id"]
+    recent = [f for f in ids
+              if (h := (fb.get(f) or {}).get("history")) and h[-1]["status"] == "just_late"
+              and _days_since(h[-1].get("at"), now) < SNOOZE_DAYS["just_late"]]
+    if len(recent) < JUST_LATE_ALERT_COUNT:
+        return []
+    return [{"lga": lga, "count": len(recent), "cause": "just_late_backlog",
+             "message": f"{len(recent)} facilities in {lga} were checked and found 'just late'. "
+                        f"Alert the LGA data office about a possible data-entry backlog."}]
 
 
 @app.get("/health")
@@ -165,13 +266,18 @@ async def officer_list(lga: str, capacity: int = Query(12, ge=1, le=100)):
     g = rt[rt["lga"] == lga]
     if g.empty:
         raise HTTPException(404, f"Unknown LGA: {lga}")
-    top = g.sort_values("priority", ascending=False).head(capacity)
-    alerts = [a for a in STATE["cluster_alerts"] if a["lga"] == lga]
+    top = _to_do(g, capacity)
+    by_priority = lambda q: g[g["queue"] == q].sort_values("priority", ascending=False)
+    alerts = [a for a in STATE["cluster_alerts"] if a["lga"] == lga] + _just_late_alerts(lga)
     return {
         "lga": lga, "state": STATE["world"]["state"], "data_as_of": STATE["world"]["periods"][-1],
         "facilities_in_lga": int(len(g)), "flagged_this_week": int((g["tag"].isin(["HIGH", "MEDIUM"])).sum()),
         "lga_wide_alerts": len(alerts), "warning_banners": alerts, "capacity": capacity,
-        "cards": [_row_to_card(r) for _, r in top.iterrows()], "sample_data": True,
+        "cards": [_row_to_card(r, i) for i, (_, r) in enumerate(top.iterrows(), 1)],
+        "follow_up": [_row_to_card(r) for _, r in by_priority("follow_up").iterrows()],
+        "checking": [_row_to_card(r) for _, r in by_priority("checking").iterrows()],
+        "snoozed_count": int((g["queue"] == "snoozed").sum()),
+        "sample_data": True,
     }
 
 
@@ -189,9 +295,11 @@ async def facility_detail(facility_id: str):
     } for m, rep, st in zip(hist["month"], hist["reported"], hist["service_total"])]
 
     fb = (_load_feedback().get(facility_id) or {})
+    override = fb.get("override") if r["override_active"] else None
     return {
         "facility_id": facility_id, "name": r["name"], "lga": r["lga"], "state": r["state"],
-        "type": "Primary Health Centre", "lat": float(r["lat"]), "lon": float(r["lon"]),
+        "type": r["facility_type"] if "facility_type" in r else "Primary Health Centre",
+        "lat": float(r["lat"]), "lon": float(r["lon"]),
         "population": int(r["population"]), "people_served_label": f"About {int(round(r['population'], -2)):,}",
         "tag": str(r["tag"]), "urban": bool(r["urban"]),
         "reporting_chart": chart, "expected_level": round(float(r["expected_service_total"]), 1),
@@ -200,14 +308,19 @@ async def facility_detail(facility_id: str):
         "trouble_uncertainty": round(float(r["trouble_uncertainty"]), 3),
         "months_since_last_report": int(r["months_since_last_report"]),
         "tiles": {
-            "staff": f"{int(r['staff_count'])} of {int(r['staff_standard'])} standard",
-            "cold_chain": "Needs check" if r["pred_cause"] in ("sudden_drop", "late_entry") and r["power_reliability"] < 0.5 else "No flag",
-            "connectivity": f"{round(float(r['connectivity']) * 100)}%",
+            # The spec pipeline supplies its own staff / cold chain / connectivity text.
+            **(r["tiles"] if "tiles" in r and isinstance(r["tiles"], dict) else {
+                "staff": f"{int(r['staff_count'])} of {int(r['staff_standard'])} standard",
+                "cold_chain": "Needs check" if r["pred_cause"] in ("sudden_drop", "late_entry") and r["power_reliability"] < 0.5 else "No flag",
+                "connectivity": f"{round(float(r['connectivity']) * 100)}%",
+            }),
             "last_report": f"{int(r['months_since_last_report'])} month(s) ago" if r["months_since_last_report"] else "This month",
             "distance_km": float(r["distance_km"]),
         },
-        "officer_status": fb.get("status"), "visited": bool(fb.get("visited", False)),
-        "override_tag": fb.get("override_tag"), "sample_data": True,
+        "failure_types": r["failure_types"] if "failure_types" in r else None,
+        "low_confidence": bool(r["low_confidence"]), "history_months": int(r["history_months"]),
+        "officer_status": r["officer_status"], "check_method": r["check_method"], "queue": r["queue"],
+        "status_history": fb.get("history", []), "override": override, "sample_data": True,
         "contact_hint": {
             "phone_sample": None if pd.isna(r.get("in_charge_phone_sample")) else str(r.get("in_charge_phone_sample")),
             "whatsapp_opt_in": None if pd.isna(r.get("whatsapp_opt_in")) else bool(r.get("whatsapp_opt_in")),
@@ -215,45 +328,64 @@ async def facility_detail(facility_id: str):
     }
 
 
+def _risk_row(facility_id: str) -> pd.Series:
+    row = STATE["risk_table"][STATE["risk_table"]["facility_id"] == facility_id]
+    if row.empty:
+        raise HTTPException(404, "Unknown facility")
+    return row.iloc[0]
+
+
 @app.post("/api/facility/{facility_id}/feedback")
 async def set_feedback(facility_id: str, body: dict):
+    """Record the result of a check. Everything needed to turn it into a
+    training label later is saved with it: score and model at the time,
+    who answered, and how the check was done."""
     status = body.get("status")
-    if status not in ("confirmed", "cleared", "just_late"):
-        raise HTTPException(400, "status must be confirmed, cleared or just_late")
+    if status not in STATUSES:
+        raise HTTPException(400, f"status must be one of {', '.join(STATUSES)}")
+    method = body.get("method")
+    if status in RESULT_STATUSES and method not in METHODS:
+        raise HTTPException(400, f"Say how the check was done: method must be one of {', '.join(METHODS)}")
+    problem_type = body.get("problem_type") or None
+    if problem_type and (status != "confirmed" or problem_type not in PROBLEM_TYPES):
+        raise HTTPException(400, f"problem_type is only for confirmed, one of {', '.join(PROBLEM_TYPES)}")
+    r = _risk_row(facility_id)
+    record = {
+        "status": status, "at": pd.Timestamp.utcnow().isoformat(),
+        "method": method if status != "checking" else None, "problem_type": problem_type,
+        "answered_by": (body.get("answered_by") or "").strip() or None,
+        "role": (body.get("role") or "").strip() or None,
+        "score_at_flag": round(float(r["priority"]), 4),
+        "trouble_prob_at_flag": round(float(r["trouble_prob"]), 4),
+        "model_version": STATE["model_version"], "data_as_of": r["month"],
+    }
     with _feedback_lock:
         fb = _load_feedback()
-        entry = fb.get(facility_id, {})
-        entry["status"] = status
-        entry["at"] = pd.Timestamp.utcnow().isoformat()
-        fb[facility_id] = entry
+        entry = fb.setdefault(facility_id, {"history": [], "override": None})
+        entry["history"].append(record)
         _save_feedback(fb)
-    return {"ok": True, "facility_id": facility_id, "status": status}
-
-
-@app.post("/api/facility/{facility_id}/visited")
-async def mark_visited(facility_id: str, body: dict | None = None):
-    with _feedback_lock:
-        fb = _load_feedback()
-        entry = fb.get(facility_id, {})
-        entry["visited"] = True
-        entry["visited_at"] = pd.Timestamp.utcnow().isoformat()
-        fb[facility_id] = entry
-        _save_feedback(fb)
-    return {"ok": True, "facility_id": facility_id, "visited": True}
+    return {"ok": True, "facility_id": facility_id, **record}
 
 
 @app.post("/api/facility/{facility_id}/override")
 async def override_flag(facility_id: str, body: dict):
-    tag = body.get("tag")
-    if tag not in ("HIGH", "MEDIUM", "LOW", None):
-        raise HTTPException(400, "tag must be HIGH, MEDIUM, LOW or null")
+    """The officer disagrees with the flag WITHOUT checking. Needs a reason,
+    snoozes the flag for 30 days, and is only a weak signal, never a label.
+    Send {"clear": true} to lift it."""
+    _risk_row(facility_id)
+    clear = bool(body.get("clear"))
+    reason = (body.get("reason") or "").strip()
+    if not clear and not reason:
+        raise HTTPException(400, "An override needs a short reason")
     with _feedback_lock:
         fb = _load_feedback()
-        entry = fb.get(facility_id, {})
-        entry["override_tag"] = tag
-        fb[facility_id] = entry
+        entry = fb.setdefault(facility_id, {"history": [], "override": None})
+        entry["override"] = None if clear else {
+            "reason": reason, "at": pd.Timestamp.utcnow().isoformat(),
+            "snooze_days": OVERRIDE_SNOOZE_DAYS, "model_version": STATE["model_version"],
+        }
         _save_feedback(fb)
-    return {"ok": True, "facility_id": facility_id, "override_tag": tag}
+    return {"ok": True, "facility_id": facility_id, "override": entry["override"]}
 
 
 @app.get("/api/state/overview")
@@ -284,13 +416,13 @@ async def export_csv(lga: str | None = None, capacity: int = Query(1000, ge=1, l
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["rank", "facility", "lga", "tag", "people_served", "reason", "suggested_action",
-                     "silence_type", "trouble_probability", "months_since_last_report", "officer_status"])
+                     "silence_type", "trouble_probability", "months_since_last_report", "low_confidence",
+                     "officer_status", "check_method"])
     for _, r in rt.iterrows():
-        status = r.get("officer_status")
-        status = "" if pd.isna(status) else status
         writer.writerow([r["rank"], r["name"], r["lga"], r["tag"], int(r["population"]), r["reason"],
                          r["suggested_action"], r["silence_label"], round(float(r["trouble_prob"]), 3),
-                         int(r["months_since_last_report"]), status])
+                         int(r["months_since_last_report"]), bool(r["low_confidence"]),
+                         r["officer_status"] or "", r["check_method"] or ""])
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f"attachment; filename=phc-triage-{lga or 'all'}.csv"})
@@ -320,7 +452,8 @@ def _weekly_brief_template(lga: str, cards: list, alerts: list) -> str:
         for a in alerts:
             lines.append(f"⚠ {a['message']}")
     lines.append("")
-    lines.append("Open the full list on the dashboard. Reply Confirmed / Cleared / Just late after each visit.")
+    lines.append("Open the full list on the dashboard and record the result of each check: "
+                 "Confirmed / Cleared / Just late / Couldn't verify.")
     return "\n".join(lines)
 
 

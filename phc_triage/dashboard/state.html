@@ -86,9 +86,50 @@ async function loadValidation() {
   let v;
   try { v = await PT.api("/api/validation"); }
   catch (e) { $("#validation").innerHTML = `<p class="faint">Not available yet.</p>`; return; }
+  try {
+    $("#validation").innerHTML = v.baseline_world ? specValidationHtml(v) : legacyValidationHtml(v);
+  } catch (e) {
+    $("#validation").innerHTML = `<p class="faint">Validation results are in an unexpected format.</p>`;
+  }
+}
+
+// Report written by phc_triage/ml/train.py (the spec-built pipeline).
+function specValidationHtml(v) {
+  const all = v.baseline_world.all_lgas, held = v.baseline_world.heldout_lgas_only;
+  const c = all.comparison, k5 = (m) => c[m].per_lga_k5.precision;
+  const bestBase = Math.max(k5("baseline_a_silent_2_months"), k5("baseline_b_low_reporting_rate"));
+  const hc = held.comparison;
+  const heldBase = Math.max(hc.baseline_a_silent_2_months.per_lga_k5.precision, hc.baseline_b_low_reporting_rate.per_lga_k5.precision);
+  const cross = Object.values(v.cross_world || {});
+  const crossMin = cross.length ? Math.min(...cross.map((x) => x["model_p@5_lga"])) : null;
+  const crossWins = cross.filter((x) => x.beats_both_baselines).length;
+  const fair = all.fairness, sil = all.silence_type;
+  return `
+    <p class="faint">${PT.esc(v.note)}</p>
+    <div class="kpis" style="margin-top:4px">
+      <div class="kpi"><div class="label">Model: right in top 5 per LGA</div><div class="value">${PT.pct(k5("model"))}</div></div>
+      <div class="kpi"><div class="label">Best simple rule</div><div class="value">${PT.pct(bestBase)}</div></div>
+      <div class="kpi"><div class="label">LGAs never seen in training</div><div class="value">${PT.pct(hc.model.per_lga_k5.precision)}</div></div>
+      <div class="kpi"><div class="label">Random pick (base rate)</div><div class="value">${PT.pct(k5("random"))}</div></div>
+    </div>
+    <p style="margin-top:12px"><b>Against the simple rules</b> — "silent 2+ months" ${PT.pct(k5("baseline_a_silent_2_months"))},
+      "low reporting rate" ${PT.pct(k5("baseline_b_low_reporting_rate"))}. In held-out LGAs the model scores
+      ${PT.pct(hc.model.per_lga_k5.precision)} vs ${PT.pct(heldBase)} for the best rule.</p>
+    ${cross.length ? `<p><b>Stress test</b> — trained on the baseline world, tested on ${cross.length} different worlds (weaker link, more noise,
+      more chronic non-reporters, insecurity…): beats both rules in ${crossWins} of ${cross.length}; lowest score ${PT.pct(crossMin)}.</p>` : ""}
+    <p><b>Fairness check</b> — rural ${PT.pct(fair.rural.precision)} vs urban ${PT.pct(fair.urban.precision)} right, at flag rates
+      ${PT.pct(fair.rural.flag_rate)} and ${PT.pct(fair.urban.flag_rate)}.</p>
+    <p><b>Why facilities are quiet</b> — silence type right ${PT.pct(sil.accuracy)} of the time (guessing the commonest cause: ${PT.pct(sil.majority_class_accuracy)}).</p>
+    <p class="faint">Target: ${PT.esc(v.label)}. AUC ${all.calibration.auc}, Brier ${all.calibration.brier}.
+      Limit: the model finds facilities already struggling; it gives little early warning of new trouble
+      (${PT.pct(c.model.detection.early_rate)} of new episodes flagged in advance).</p>`;
+}
+
+// Report written by the original stimulate-data pipeline (backend/train.py).
+function legacyValidationHtml(v) {
   const mp = v.model_precision_recall_at_k, bp = v.baseline_precision_recall_at_k;
   const st = v.stress_test;
-  $("#validation").innerHTML = `
+  return `
     <p class="faint">${PT.esc(v.note)}</p>
     <div class="kpis" style="margin-top:4px">
       <div class="kpi"><div class="label">Model precision@${mp.k}</div><div class="value">${PT.pct(mp.precision)}</div></div>

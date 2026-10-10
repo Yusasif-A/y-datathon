@@ -1,0 +1,5 @@
+# False-alarm test (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+reporting:
+  c: 0.0
+  lga_backlog_rate: 0.15

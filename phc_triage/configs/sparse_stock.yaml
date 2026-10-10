@@ -1,0 +1,5 @@
+# Low stock visibility (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+stock_reporting:
+  concentrated_state_share: 0.08
+  other_state_share: 0.08
