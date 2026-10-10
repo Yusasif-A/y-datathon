@@ -1,0 +1,5 @@
+# Staffing risk (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+shocks:
+  staff_loss: 0.04
+  strike: 0.05

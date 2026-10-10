@@ -1,0 +1,5 @@
+# Robustness (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+noise:
+  under_reporting_share: 0.50
+  incomplete_base: 0.15

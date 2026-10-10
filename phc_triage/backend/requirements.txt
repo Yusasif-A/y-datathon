@@ -6,3 +6,9 @@ scikit-learn
 lightgbm
 shap
 joblib
+httpx
+python-dotenv
+pyarrow
+pyyaml
+openpyxl
+scipy

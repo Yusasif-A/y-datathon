@@ -1,0 +1,4 @@
+# Stress test (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+reporting:
+  c: 0.25

@@ -19,22 +19,47 @@ import features
 from train import predict_trouble
 
 ACTIONS = {
-    "lga_wide": "Send one note to the LGA data office — not {n} separate visits.",
-    "insecure_silence": "Escalate to the state desk. Do not suggest a visit while the area is insecure.",
-    "sudden_drop": "Call the in-charge soon, then verify through the ward committee.",
-    "chronic_poor_reporter": "Low priority unless another signal appears — this facility is always a slow reporter.",
+    "lga_wide": "Send one note to the LGA data office, not separate visits to each facility.",
+    "closure": "Confirm whether the facility is open. If it has closed, redirect patients and flag the registry.",
+    "sudden_drop": "Call the officer-in-charge soon, then verify through the ward committee.",
+    "chronic_poor_reporter": "Schedule a support check and help the facility to report. "
+                             "Not low priority: chronic non-reporters are often the least-resourced facilities.",
     "late_entry": "Chase the paperwork with the records officer; not urgent on its own.",
-    "none": "No reporting concern. Review only if the trouble forecast is high.",
+    "none": "No action needed this week.",
 }
 
+# Older training data merged closure and insecurity into one silence class.
+ACTIONS["insecure_silence"] = ACTIONS["closure"]
+
+# Insecurity is a modifier, not a cause: whatever the cause, never suggest a visit.
+INSECURE_ACTION = "Escalate to the state desk and check by phone. Do not suggest a visit while the area is insecure."
+
+# A facility that reports normally can still be at high risk. Its action then
+# comes from the strongest factor pushing its forecast up.
+FORECAST_ACTIONS = {
+    "Medicine / family planning": "Call the officer-in-charge to check stock of tracer medicines; arrange resupply if short.",
+    "Vaccine / cold chain": "Ask the officer-in-charge to confirm the vaccine fridge is working and check vaccine stock.",
+    "Staff": "Check staffing with the officer-in-charge and discuss cover with the LGA.",
+    "Infrastructure": "Check power, funding and the last supply delivery with the officer-in-charge.",
+    "Distance / access": "Call the officer-in-charge; there is no nearby alternative if this facility struggles.",
+    "Reporting / silence": "Call the officer-in-charge to ask why reports are slipping.",
+    "Security": INSECURE_ACTION,
+    "Season": "Call the officer-in-charge to check stock ahead of the seasonal peak.",
+}
+FORECAST_ACTION_MIN_PROB = 0.3
+
 SILENCE_LABEL = {
-    "lga_wide": "whole LGA quiet",
-    "insecure_silence": "silent, insecure area",
+    "lga_wide": "LGA-wide backlog",
+    "closure": "possible closure",
+    "insecure_silence": "possible closure or insecurity",
     "sudden_drop": "sudden drop",
-    "chronic_poor_reporter": "chronic poor reporter",
+    "chronic_poor_reporter": "chronic non-reporter",
     "late_entry": "late data entry",
     "none": "reporting normally",
 }
+
+# Facilities with fewer reported months than this get a "low confidence" tag.
+LOW_CONFIDENCE_MONTHS = 6
 
 FEATURE_GROUP = {
     "months_since_last_report": "Reporting / silence", "reported_rate_3m": "Reporting / silence",
@@ -65,7 +90,6 @@ def _impact_score(df: pd.DataFrame) -> pd.Series:
 
 
 def _reason_sentence(row) -> str:
-    cause = row["true_cause"] if pd.notna(row.get("true_cause")) else row["pred_cause"]
     pred_cause = row["pred_cause"]
     bits = []
     msr = int(row["months_since_last_report"])
@@ -76,7 +100,9 @@ def _reason_sentence(row) -> str:
         else:
             bits.append(f"silent {msr} month{'s' if msr != 1 else ''}")
     else:
-        bits.append("reported on time this month")
+        bits.append("reports arriving normally")
+    if row["trouble_prob"] >= FORECAST_ACTION_MIN_PROB and row["top_factor"]:
+        bits.append(f"main risk factor: {row['top_factor'].lower()}")
     if row["power_reliability"] < 0.35:
         bits.append("unreliable power")
     if row["staff_ratio"] < 0.75:
@@ -85,9 +111,22 @@ def _reason_sentence(row) -> str:
         bits.append(f"nearest alternative {row['distance_km']:.0f} km away")
     if pred_cause == "lga_wide":
         bits.append("other facilities in the same LGA are quiet too — looks like a data-entry backlog")
-    if pred_cause == "insecure_silence":
+    if row["insecurity"]:
         bits.append("in an area with an active insecurity concern")
+    if row["low_confidence"]:
+        bits.append("little reporting history, so this score is low confidence")
     return ", ".join(bits).capitalize() + "."
+
+
+def _suggested_action(row) -> str:
+    if row["insecurity"]:
+        return INSECURE_ACTION
+    cause = row["pred_cause"]
+    if cause == "none":
+        if row["trouble_prob"] >= FORECAST_ACTION_MIN_PROB and row["top_factor"]:
+            return FORECAST_ACTIONS.get(row["top_factor"], ACTIONS["sudden_drop"])
+        return ACTIONS["none"]
+    return ACTIONS.get(cause, ACTIONS["none"])
 
 
 def build_risk_table(world: dict, bundle: dict, as_of_month: int | None = None) -> pd.DataFrame:
@@ -151,12 +190,23 @@ def build_risk_table(world: dict, bundle: dict, as_of_month: int | None = None) 
               key=lambda x: -abs(x["impact"]))
         for _, row in group_shap.iterrows()
     ]
+    top_group = group_shap.idxmax(axis=1)
+    snap["top_factor"] = top_group.where(group_shap.max(axis=1) > 0, "")
+
+    # Thin history is never read as "fine": the score stands, but it is tagged
+    # low confidence so the officer knows, and capped in the officer list.
+    reports = world["reports"]
+    history = (reports[reports["month_idx"] <= as_of_month]
+               .groupby("facility_id")["reported"].sum().rename("history_months"))
+    snap = snap.merge(history, on="facility_id", how="left")
+    snap["history_months"] = snap["history_months"].fillna(0).astype(int)
+    snap["low_confidence"] = snap["history_months"] < LOW_CONFIDENCE_MONTHS
 
     snap["tag"] = pd.cut(snap["priority"], bins=[-1, snap["priority"].quantile(0.6),
                                                  snap["priority"].quantile(0.88), 2],
                         labels=["LOW", "MEDIUM", "HIGH"])
     snap["reason"] = snap.apply(_reason_sentence, axis=1)
-    snap["suggested_action"] = snap["pred_cause"].map(ACTIONS).fillna(ACTIONS["none"])
+    snap["suggested_action"] = snap.apply(_suggested_action, axis=1)
     snap["silence_label"] = snap["pred_cause"].map(SILENCE_LABEL).fillna("reporting normally")
 
     name_cols = ["facility_id", "name", "lga", "state", "lat", "lon", "population", "urban",
@@ -169,14 +219,14 @@ def build_risk_table(world: dict, bundle: dict, as_of_month: int | None = None) 
         "reported", "months_since_last_report", "reported_rate_12m", "on_time_rate_6m",
         "trouble_prob", "trouble_uncertainty", "pred_cause", "silence_label", "impact_score",
         "priority", "tag", "reason", "suggested_action", "reason_breakdown", "expected_service_total",
-        "service_total", "month", "month_idx",
+        "service_total", "month", "month_idx", "top_factor", "history_months", "low_confidence",
     ]
     out = out[[c for c in keep if c in out.columns]].sort_values("priority", ascending=False).reset_index(drop=True)
     out["rank"] = np.arange(1, len(out) + 1)
     return out
 
 
-def cluster_alerts(world: dict, risk_table: pd.DataFrame) -> list:
+def cluster_alerts(world: dict, risk_table: pd.DataFrame, min_frac: float = 0.4) -> list:
     """LGAs where a large share of facilities went quiet together this
     month — the state-overview / officer-banner 'likely a backlog' alert."""
     month = risk_table["month"].iloc[0] if len(risk_table) else None
@@ -184,9 +234,10 @@ def cluster_alerts(world: dict, risk_table: pd.DataFrame) -> list:
     for lga, g in risk_table.groupby("lga"):
         silent = g[g["months_since_last_report"] >= 1]
         frac = len(silent) / len(g) if len(g) else 0
-        if len(silent) >= 3 and frac >= 0.4:
+        if len(silent) >= 3 and frac >= min_frac:
             cause = silent["pred_cause"].mode().iat[0] if len(silent) else "lga_wide"
-            if cause == "insecure_silence":
+            if silent["insecurity"].astype(bool).mean() >= 0.5:
+                cause = "insecure"
                 msg = f"{len(silent)} facilities in {lga} are quiet after an insecurity report. Escalate — do not send visits."
             else:
                 msg = f"{len(silent)} facilities in {lga} went quiet together in {month}. Likely a data-entry backlog — contact the LGA data office."

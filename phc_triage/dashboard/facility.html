@@ -37,7 +37,15 @@
     <p id="silence-type" class="mono"></p>
     <h2 style="margin-top:14px">Suggested action</h2>
     <p id="action"></p>
-    <div class="btns no-print" id="btns" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+    <h2 style="margin-top:14px">Record the result of a check</h2>
+    <div id="btns"></div>
+    <h2 style="margin-top:14px">Checks recorded</h2>
+    <ul id="history" style="margin:0;padding-left:18px"></ul>
+  </div>
+
+  <div class="panel no-print">
+    <h2>Override</h2>
+    <div id="override"></div>
   </div>
 
   <div class="panel no-print">
@@ -67,11 +75,14 @@ async function boot() {
   document.title = `${d.name} — PHC Triage`;
   $("#f-name").textContent = d.name;
   $("#f-tag").textContent = d.tag; $("#f-tag").className = `tag ${d.tag}`;
-  $("#f-meta").textContent = `${d.type} · ${d.lga}, ${d.state} · ${d.people_served_label} people served · Sample data`;
+  const statusNote = d.officer_status ? ` · Last check: ${PT.STATUS_LABELS[d.officer_status] || d.officer_status}` : "";
+  const confNote = d.low_confidence ? ` · Low confidence (${d.history_months} months of reports)` : "";
+  $("#f-meta").textContent = `${d.type} · ${d.lga}, ${d.state} · ${d.people_served_label} people served${statusNote}${confNote} · Sample data`;
 
   const months = d.reporting_chart.map((r) => r.month);
   const values = d.reporting_chart.map((r) => (r.reported ? r.service_total : null));
   const expected = months.map(() => d.expected_level);
+  Chart.getChart($("#chart-reports"))?.destroy();
   new Chart($("#chart-reports"), {
     data: {
       labels: months,
@@ -102,7 +113,9 @@ async function boot() {
     <div class="tile"><div class="k">Days since last report</div><div class="v">${PT.esc(t.last_report)}</div></div>
     <div class="tile"><div class="k">Distance to next facility</div><div class="v">${t.distance_km.toFixed(0)} km</div></div>`;
 
-  $("#silence-type").textContent = `${d.silence_type} · trouble forecast ${PT.pct(d.trouble_prob)} (±${PT.pct(d.trouble_uncertainty)})`;
+  const ft = d.failure_types;
+  const typeNote = ft ? ` · next 1–2 months: medicines ${PT.pct(ft.medicine)}, vaccine/cold chain ${PT.pct(ft.vaccine)}, staff ${PT.pct(ft.staff)}, closure ${PT.pct(ft.closed)}` : "";
+  $("#silence-type").textContent = `${d.silence_type} · serious trouble forecast ${PT.pct(d.trouble_prob)} (±${PT.pct(d.trouble_uncertainty)})${typeNote}`;
   $("#action").textContent = d.suggested_action;
 
   const ch = d.contact_hint || {};
@@ -115,24 +128,34 @@ async function boot() {
     reminderBtn.title = "Reported on time this month — a reminder would be factually wrong.";
   }
 
-  const mk = (label, extra) => `<button class="btn sm" data-act="${extra}">${label}</button>`;
-  $("#btns").innerHTML = [
-    mk("Confirmed", "status:confirmed"), mk("Cleared", "status:cleared"), mk("Just late", "status:just_late"),
-    mk(d.visited ? "Visited ✓" : "Mark visited", "visit"),
-    mk("Override: HIGH", "override:HIGH"), mk("Override: MEDIUM", "override:MEDIUM"),
-    mk("Override: LOW", "override:LOW"), mk("Clear override", "override:null"),
-  ].join("");
-  $("#btns").querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
-    const [kind, val] = b.dataset.act.split(":");
-    try {
-      if (kind === "status") await PT.api(`/api/facility/${encodeURIComponent(fid)}/feedback`, { method: "POST", body: { status: val } });
-      else if (kind === "visit") await PT.api(`/api/facility/${encodeURIComponent(fid)}/visited`, { method: "POST", body: {} });
-      else if (kind === "override") await PT.api(`/api/facility/${encodeURIComponent(fid)}/override`, { method: "POST", body: { tag: val === "null" ? null : val } });
-      PT.toast("Saved"); boot();
-    } catch (e) { PT.toast(e.message); }
-  }));
+  $("#btns").innerHTML = PT.statusControlHtml(d);
+  $("#btns").dataset.fid = fid;
+  PT.bindCardActions($("#btns").parentElement, boot);
 
-  $("#wa-btns").querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
+  const ov = d.override;
+  $("#override").innerHTML = ov
+    ? `<p>Flag overridden: “${PT.esc(ov.reason)}” — snoozed for ${ov.snooze_days} days.</p>
+       <button class="btn sm" id="override-clear">Lift override</button>`
+    : `<p class="faint">Disagree with this flag without checking? Give a reason. It snoozes the flag for 30 days and counts only as a weak signal, not a result.</p>
+       <button class="btn sm" id="override-set">Override flag…</button>`;
+  $("#override button").addEventListener("click", async () => {
+    let body = { clear: true };
+    if (!ov) {
+      const reason = (prompt("Why do you disagree with this flag?", "") || "").trim();
+      if (!reason) { PT.toast("An override needs a reason."); return; }
+      body = { reason };
+    }
+    try { await PT.api(`/api/facility/${encodeURIComponent(fid)}/override`, { method: "POST", body }); PT.toast("Saved"); boot(); }
+    catch (e) { PT.toast(e.message); }
+  });
+
+  const hist = d.status_history || [];
+  $("#history").innerHTML = hist.length
+    ? hist.slice().reverse().map((h) => `<li><span class="mono faint">${PT.esc((h.at || "").slice(0, 10))}</span>
+        ${PT.esc(PT.STATUS_LABELS[h.status] || h.status)}${h.method ? ` · ${PT.esc(PT.METHOD_LABELS[h.method] || h.method)}` : ""}${h.problem_type ? ` · ${PT.esc(PT.PROBLEM_LABELS[h.problem_type] || h.problem_type)}` : ""}</li>`).join("")
+    : `<li class="faint">No checks recorded yet.</li>`;
+
+  $("#wa-btns").querySelectorAll("button").forEach((b) => { b.onclick = async () => {
     const hint = ch.phone_sample ? ` (sample contact on file: ${ch.phone_sample} — not auto-used)` : "";
     const to = prompt(`Facility in-charge's WhatsApp number, with country code${hint}. Leave blank to just preview.`, "");
     if (!to) { PT.toast("Preview only — message is ready, nothing was sent."); return; }
@@ -143,7 +166,7 @@ async function boot() {
       else PT.toast(`Not sent: ${res.reason || "unknown error"}`);
     } catch (e) { PT.toast(e.message); }
     b.disabled = false;
-  }));
+  }; });
 }
 boot();
 </script>

@@ -67,47 +67,79 @@ const PT = (() => {
     initTheme();
   }
 
+  // Status control (solution doc v2, 7.4): a status is the RESULT of a check,
+  // recorded with how the check was done. "Checking" means waiting for an answer.
+  const STATUS_LABELS = {
+    checking: "Checking", confirmed: "Confirmed", cleared: "Cleared",
+    just_late: "Just late", could_not_verify: "Couldn't verify",
+  };
+  const METHOD_LABELS = { phone: "Phone call", visit: "Visit", committee_sms: "Ward committee SMS" };
+  const PROBLEM_LABELS = { medicine: "Medicine", vaccine: "Vaccine / fridge", staff: "Staff", closed: "Closed", other: "Other" };
+
+  const options = (labels, selected, blank) =>
+    (blank ? `<option value="">${blank}</option>` : "") +
+    Object.entries(labels).map(([v, l]) => `<option value="${v}" ${v === selected ? "selected" : ""}>${l}</option>`).join("");
+
+  function statusControlHtml(c) {
+    const btn = (s) => `<button data-status="${s}" data-active="${c.officer_status === s ? 1 : 0}">${STATUS_LABELS[s]}</button>`;
+    return `<div class="status-control no-print">
+      <label>How was it checked?
+        <select class="select sm" data-method>${options(METHOD_LABELS, c.check_method, "Choose…")}</select></label>
+      <label data-problem-wrap hidden>Problem found
+        <select class="select sm" data-problem>${options(PROBLEM_LABELS, null, "Not sure")}</select></label>
+      <div class="btns">${Object.keys(STATUS_LABELS).map(btn).join("")}</div>
+    </div>`;
+  }
+
   function cardHtml(c) {
-    const btn = (status, label) => `<button data-status="${status}" data-active="${c.officer_status === status ? 1 : 0}">${label}</button>`;
-    return `<article class="f-card ${esc(c.tag)} ${c.visited ? "visited" : ""}" data-fid="${esc(c.facility_id)}">
+    const status = c.officer_status ? `<span class="status-pill">${esc(STATUS_LABELS[c.officer_status] || c.officer_status)}</span>` : "";
+    const lowConf = c.low_confidence ? `<span class="status-pill">Low confidence</span>` : "";
+    return `<article class="f-card ${esc(c.tag)}" data-fid="${esc(c.facility_id)}">
       <div class="rank">${c.rank}</div>
       <div>
         <div class="title-row">
           <span class="fname"><a href="/facility.html?id=${esc(c.facility_id)}">${esc(c.name)}</a></span>
-          <span class="tag ${esc(c.tag)}">${esc(c.tag)}</span>
+          <span class="tag ${esc(c.tag)}">${esc(c.tag)}</span>${status}${lowConf}
           <span class="faint">${esc(c.people_served_label)} people served</span>
         </div>
         <div class="meta">${esc(c.lga)} · ${esc(c.silence_type)} · trouble ${pct(c.trouble_prob)} (±${pct(c.trouble_uncertainty)})</div>
         <p class="reason">${esc(c.reason)}</p>
         <p class="action"><b>Suggested action:</b> ${esc(c.suggested_action)}</p>
       </div>
-      <div class="btns no-print">
-        ${btn("confirmed", "Confirmed")}${btn("cleared", "Cleared")}${btn("just_late", "Just late")}
-        <button data-visit="1" data-active="${c.visited ? 1 : 0}">${c.visited ? "Visited ✓" : "Mark visited"}</button>
-      </div>
+      ${statusControlHtml(c)}
     </article>`;
   }
 
-  function bindCardActions(root) {
-    root.querySelectorAll(".f-card").forEach((card) => {
+  // Wires every status control under `root`. `onSaved` runs after a status is
+  // recorded (the list reloads, since the facility may move to another list).
+  function bindCardActions(root, onSaved) {
+    root.querySelectorAll("[data-fid]").forEach((card) => {
       const fid = card.dataset.fid;
-      card.querySelectorAll("[data-status]").forEach((b) => b.addEventListener("click", async () => {
-        try {
-          await api(`/api/facility/${encodeURIComponent(fid)}/feedback`, { method: "POST", body: { status: b.dataset.status } });
-          card.querySelectorAll("[data-status]").forEach((x) => x.setAttribute("data-active", x === b ? "1" : "0"));
-          toast(`${card.querySelector(".fname").textContent.trim()} → ${b.textContent}`);
-        } catch (e) { toast(e.message); }
-      }));
-      const visitBtn = card.querySelector("[data-visit]");
-      if (visitBtn) visitBtn.addEventListener("click", async () => {
-        try {
-          await api(`/api/facility/${encodeURIComponent(fid)}/visited`, { method: "POST", body: {} });
-          visitBtn.textContent = "Visited ✓"; visitBtn.setAttribute("data-active", "1");
-          card.classList.add("visited");
-        } catch (e) { toast(e.message); }
+      const method = card.querySelector("[data-method]");
+      const problem = card.querySelector("[data-problem]");
+      const problemWrap = card.querySelector("[data-problem-wrap]");
+      card.querySelectorAll("[data-status]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          const status = b.dataset.status;
+          if (status !== "checking" && !method.value) {
+            method.focus(); toast("First choose how the facility was checked."); return;
+          }
+          if (status === "confirmed" && problemWrap.hidden) {
+            problemWrap.hidden = false; problem.focus();
+            toast("Choose the problem found (or 'Not sure'), then press Confirmed again."); return;
+          }
+          const body = { status, method: method.value || null,
+                         problem_type: status === "confirmed" ? (problem.value || null) : null };
+          try {
+            await api(`/api/facility/${encodeURIComponent(fid)}/feedback`, { method: "POST", body });
+            toast(`${card.querySelector(".fname, h1")?.textContent.trim() || fid} → ${STATUS_LABELS[status]}`);
+            if (onSaved) onSaved();
+          } catch (e) { toast(e.message); }
+        });
       });
     });
   }
 
-  return { api, url, esc, qs, num, pct, toast, initTheme, topbar, cardHtml, bindCardActions };
+  return { api, url, esc, qs, num, pct, toast, initTheme, topbar, cardHtml, statusControlHtml, bindCardActions,
+           STATUS_LABELS, METHOD_LABELS, PROBLEM_LABELS };
 })();

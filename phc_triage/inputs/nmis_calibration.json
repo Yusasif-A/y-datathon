@@ -1,0 +1,37 @@
+{
+  "source": "NMIS health facility data 2014 (surveyed 2010-2014), primary facility types only",
+  "urban_matching": "GRID3 v3.0 settlement type of the nearest GRID3 point within 1 km",
+  "all": {
+    "n": 29834,
+    "grid_power": 0.363,
+    "fridge": 0.185,
+    "fridge_if_grid": 0.348,
+    "fridge_if_no_grid": 0.092,
+    "act_available": 0.768,
+    "fp_offered": 0.561,
+    "clinical_staff_median": 2.0,
+    "clinical_staff_share_le2": 0.564
+  },
+  "urban": {
+    "n": 7098,
+    "grid_power": 0.65,
+    "fridge": 0.321,
+    "fridge_if_grid": 0.414,
+    "fridge_if_no_grid": 0.144,
+    "act_available": 0.848,
+    "fp_offered": 0.714,
+    "clinical_staff_median": 4.0,
+    "clinical_staff_share_le2": 0.308
+  },
+  "rural": {
+    "n": 12817,
+    "grid_power": 0.183,
+    "fridge": 0.106,
+    "fridge_if_grid": 0.233,
+    "fridge_if_no_grid": 0.078,
+    "act_available": 0.699,
+    "fp_offered": 0.439,
+    "clinical_staff_median": 1.0,
+    "clinical_staff_share_le2": 0.782
+  }
+}

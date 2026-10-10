@@ -22,7 +22,7 @@
   <h1 id="title">PHC Triage — priority list</h1>
   <p class="sub" id="sub">Sample data</p>
   <table>
-    <thead><tr><th>#</th><th>Facility</th><th>Tag</th><th>People</th><th>Reason</th><th>Action</th><th>Confirmed</th><th>Cleared</th></tr></thead>
+    <thead><tr><th>#</th><th>Facility</th><th>Tag</th><th>People</th><th>Reason</th><th>Action</th><th>Confirmed</th><th>Cleared</th><th>Just late</th><th>Couldn't verify</th><th>How checked</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
 <script src="/static/js/config.js"></script>
@@ -41,7 +41,7 @@
   document.getElementById("rows").innerHTML = d.cards.map((c) => `
     <tr><td>${c.rank}</td><td>${PT.esc(c.name)}</td><td class="tag">${c.tag}</td><td>${PT.esc(c.people_served_label)}</td>
       <td>${PT.esc(c.reason)}</td><td>${PT.esc(c.suggested_action)}</td>
-      <td><span class="box"></span></td><td><span class="box"></span></td></tr>`).join("");
+      <td><span class="box"></span></td><td><span class="box"></span></td><td><span class="box"></span></td><td><span class="box"></span></td><td></td></tr>`).join("");
   setTimeout(() => window.print(), 300);
 })();
 </script>

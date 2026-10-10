@@ -1,0 +1,4 @@
+# Closure handling (spec 9). Inherits baseline; changes only the listed parameters. SYNTHETIC.
+inherits: baseline.yaml
+shocks:
+  insecurity_event_base: 0.015
