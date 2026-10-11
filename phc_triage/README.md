@@ -4,7 +4,7 @@ Idon-Lafia's engine: a synthetic-DHIS2 simulator, three risk models
 (expected-report gap, silence-type classifier, calibrated trouble forecast),
 priority ranking, a dashboard (officer list / facility page / state
 overview) with the officer feedback loop, and urgent alerts to officers by
-WhatsApp and BimpeAI phone call. See `../project-SUMMARY.md` for the overview.
+WhatsApp and BimpeAI phone call. See `../project-SUMMARY.pdf` for the overview.
 
 Everything here is **synthetic data**, clearly labelled. No DHIS2 connection
 exists in this build — by design, per the doc's "we read, we never write"
