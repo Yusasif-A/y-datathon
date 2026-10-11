@@ -21,7 +21,7 @@ cd phc_triage
 pip install -r backend/requirements.txt
 python generate_all.py     # 15 worlds: baseline, 8 stress scenarios, c sweep (~6 min, ~520 MB, git-ignored)
 python -m ml.train         # train + full evaluation -> models/, reports/validation.md (~15 min)
-cd backend && python main.py   # dashboard on http://localhost:8010
+cd backend && python main.py   # dashboard on http://localhost:5005
 ```
 
 | Piece | What it is |
@@ -67,7 +67,7 @@ pip install -r requirements.txt
 python main.py        # first boot trains the models (~1 min), then caches to data/
 ```
 
-Open http://localhost:8010/ — the backend also serves the dashboard
+Open http://localhost:5005/ — the backend also serves the dashboard
 (`phc_triage/dashboard/`) as static files, so there's nothing else to start.
 
 To force a clean retrain (new simulated world): delete `backend/data/*.joblib`

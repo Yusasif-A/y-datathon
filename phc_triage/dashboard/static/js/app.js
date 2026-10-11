@@ -13,7 +13,7 @@ const PT = (() => {
     }
     let res;
     try { res = await fetch(url(path), init); }
-    catch (e) { throw new Error("Idon-Lafia backend is not reachable. Is it running on :8010?"); }
+    catch (e) { throw new Error("Idon-Lafia backend is not reachable. Is it running on :5005?"); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
     return data;

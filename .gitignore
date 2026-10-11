@@ -16,3 +16,4 @@ phc_triage/backend/data/alert_contacts.json
 phc_triage/backend/data/alert_state.json
 .firebase/
 .vscode/
+.wrangler/

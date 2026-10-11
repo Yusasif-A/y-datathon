@@ -79,6 +79,22 @@ def remove_contact(lga: str) -> None:
     _write(CONTACTS_PATH, contacts)
 
 
+def lgas_for_phone(phone: str) -> list:
+    phone = clean_phone(phone) or ""
+    return [lga for lga, c in _read(CONTACTS_PATH).items() if c.get("phone") == phone]
+
+
+def reopen(lga: str) -> bool:
+    """The officer messaged us, so the 24-hour window is open. Returns True
+    if an alert had been blocked and should be re-sent now."""
+    state = _read(STATE_PATH)
+    s = state.setdefault(lga, {})
+    was_blocked = bool(s.get("needs_opt_in"))
+    s["needs_opt_in"] = False
+    _write(STATE_PATH, state)
+    return was_blocked
+
+
 def opt_in_link(lga: str) -> str | None:
     """wa.me link that opens WhatsApp with a message to the business number
     ready to send. Sending it opens the 24-hour window for free-text alerts."""

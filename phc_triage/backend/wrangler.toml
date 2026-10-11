@@ -1,5 +1,6 @@
 name = "idon-lafia-api"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["python_workers"]
 main = "main.py"
 
 [env.production]

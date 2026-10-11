@@ -17,6 +17,8 @@ officer) approves any message to a facility before it is sent.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
 import re
@@ -40,6 +42,16 @@ BUSINESS_NUMBER = re.sub(r"\D", "", os.environ.get("PUBLIC_WHATSAPP_NUMBER") or 
 # 24-hour window. Body must take 3 params: {{1}} LGA, {{2}} number urgent, {{3}} link.
 ALERT_TEMPLATE = os.environ.get("WHATSAPP_ALERT_TEMPLATE")
 ALERT_TEMPLATE_LANG = os.environ.get("WHATSAPP_ALERT_TEMPLATE_LANG", "en")
+VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN")
+# Meta app secret: when set, incoming webhook calls must carry a valid signature.
+APP_SECRET = os.environ.get("WHATSAPP_APP_SECRET")
+
+
+def signature_ok(raw_body: bytes, header: str | None) -> bool:
+    if not APP_SECRET:
+        return True
+    expected = "sha256=" + hmac.new(APP_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+    return bool(header) and hmac.compare_digest(expected, header)
 # Meta error codes meaning "this person hasn't messaged us in 24 hours", so free text is refused.
 WINDOW_CLOSED_CODES = {131047, 131026, 470}
 

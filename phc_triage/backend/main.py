@@ -26,9 +26,9 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import alerts
@@ -590,6 +590,73 @@ async def alert_check(lga: str, body: dict | None = None):
     return {**alerts.status(lga), "check": result}
 
 
+@app.get("/whatsapp")
+async def whatsapp_verify(request: Request):
+    """Meta's one-time webhook verification (Callback URL .../whatsapp)."""
+    p = request.query_params
+    if whatsapp.VERIFY_TOKEN and p.get("hub.verify_token") == whatsapp.VERIFY_TOKEN:
+        return PlainTextResponse(p.get("hub.challenge") or "")
+    return PlainTextResponse("Verification token mismatch", status_code=403)
+
+
+@app.post("/whatsapp")
+async def whatsapp_incoming(request: Request):
+    """Incoming messages. Any message opens the 24-hour window for that
+    number; "START alerts <LGA>" also subscribes it, and "STOP" unsubscribes."""
+    raw = await request.body()
+    if not whatsapp.signature_ok(raw, request.headers.get("X-Hub-Signature-256")):
+        return Response(status_code=403)
+    try:
+        value = json.loads(raw)["entry"][0]["changes"][0]["value"]
+        message = value["messages"][0]
+    except (ValueError, KeyError, IndexError):
+        return Response(status_code=200)  # delivery receipts and other events
+    sender = message.get("from", "")
+    text = ((message.get("text") or {}).get("body") or "").strip()
+    asyncio.create_task(_handle_incoming(sender, text))
+    return Response(status_code=200)
+
+
+async def _handle_incoming(sender: str, text: str):
+    try:
+        reply = await _incoming_reply(sender, text)
+        if reply:
+            await whatsapp.send_text(sender, reply)
+    except Exception:
+        logger.exception("Handling WhatsApp message from %s failed", sender)
+
+
+async def _incoming_reply(sender: str, text: str) -> str | None:
+    words = text.split()
+    command = words[0].upper() if words else ""
+    lgas = STATE["world"]["lgas"]
+    mine = alerts.lgas_for_phone(sender)
+
+    if command == "STOP":
+        for lga in mine:
+            alerts.remove_contact(lga)
+        return (f"Alerts stopped for {', '.join(mine)}." if mine else "You had no alerts on.")
+
+    if command == "START":
+        asked = " ".join(w for w in words[1:] if w.lower() != "alerts")
+        lga = next((l for l in lgas if l.lower() == asked.lower()), None)
+        if not lga:
+            return ("Reply START alerts <your LGA> to get urgent alerts. LGAs: " + ", ".join(lgas))
+        if lga not in mine:
+            alerts.save_contact(lga, alerts.clean_phone(sender))
+        result = await alerts.run_check(lga, _urgent_cards(lga), force=True)
+        return None if result["sent"] else (
+            f"Alerts are on for {lga}. Nothing is urgent right now; you will get a message when a facility becomes HIGH priority.")
+
+    # Any other message reopens the window: deliver alerts that were blocked by it.
+    for lga in mine:
+        if alerts.reopen(lga):
+            await alerts.run_check(lga, _urgent_cards(lga), force=True)
+    if mine:
+        return None
+    return "Hello from Idon-Lafia. Reply START alerts <your LGA> to get urgent facility alerts."
+
+
 @app.post("/api/admin/retrain")
 async def retrain():
     """Regenerate the world and retrain all three models from scratch."""
@@ -609,4 +676,4 @@ if dashboard_dir.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8010)
+    uvicorn.run(app, host="0.0.0.0", port=5005)
