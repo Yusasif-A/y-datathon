@@ -35,15 +35,11 @@
   <div id="banners"></div>
 
   <section class="panel alert-panel no-print" id="alert-panel">
-    <h2>Urgent WhatsApp alerts <span class="faint" id="alert-badge"></span></h2>
+    <h2>Urgent alerts <span class="faint" id="alert-badge"></span></h2>
     <p class="muted" id="alert-explain">Get a WhatsApp message when a facility in this LGA becomes HIGH priority, with a link straight to it. Only the number you save here is used.</p>
-    <div class="opt-in" id="alert-optin" hidden>
-      <strong id="optin-title">Step 1: send us one WhatsApp message first.</strong>
-      <span>WhatsApp only lets a business message you after you have messaged it in the last 24 hours. Tap the button, press send in WhatsApp, then come back.</span>
-      <a class="btn sm primary" id="optin-link" target="_blank" rel="noopener">Open WhatsApp and send START</a>
-    </div>
     <form class="alert-row" id="alert-form">
-      <input class="input" id="alert-phone" type="tel" inputmode="numeric" placeholder="Your number, e.g. 2348012345678" autocomplete="tel">
+      <input class="input" id="alert-phone" type="tel" inputmode="numeric" placeholder="Your number, e.g. 08012345678" autocomplete="tel">
+      <label class="faint"><input type="checkbox" id="alert-call" checked> Also phone me</label>
       <button class="btn sm primary" type="submit" id="alert-save">Turn on alerts</button>
     </form>
     <div class="alert-row" id="alert-on" hidden>
@@ -88,7 +84,7 @@ async function boot() {
     window.open(`/printable.html?lga=${encodeURIComponent(lga)}&capacity=${cap}`, "_blank");
   });
   $("#send-whatsapp-btn").addEventListener("click", sendWhatsAppBrief);
-  $("#alert-form").addEventListener("submit", (e) => { e.preventDefault(); alertAction("subscribe", { phone: $("#alert-phone").value }); });
+  $("#alert-form").addEventListener("submit", (e) => { e.preventDefault(); alertAction("subscribe", { phone: $("#alert-phone").value, call: $("#alert-call").checked }); });
   $("#alert-check").addEventListener("click", () => alertAction("check"));
   $("#alert-resend").addEventListener("click", () => alertAction("check", { force: true }));
   $("#alert-off").addEventListener("click", () => alertAction("unsubscribe"));
@@ -97,8 +93,8 @@ async function boot() {
 
 function alertCheckToast(c) {
   if (!c) return;
-  if (c.sent) PT.toast(`WhatsApp alert sent: ${c.new} urgent facilit${c.new === 1 ? "y" : "ies"}.`);
-  else if (c.needs_opt_in) PT.toast("Blocked by WhatsApp's 24-hour rule. Send START from your phone, then press Check now.");
+  if (c.called) PT.toast(`Calling you now${c.sent ? " and WhatsApp sent" : ""}: ${c.new} urgent facilit${c.new === 1 ? "y" : "ies"}.`);
+  else if (c.sent) PT.toast(`WhatsApp alert sent: ${c.new} urgent facilit${c.new === 1 ? "y" : "ies"}.`);
   else PT.toast(c.reason || "No alert sent.");
 }
 
@@ -107,24 +103,16 @@ function renderAlerts(s) {
   $("#alert-form").hidden = on;
   $("#alert-on").hidden = !on;
   $("#alert-badge").textContent = on
-    ? (s.needs_opt_in ? `— on, but blocked until you message us` : `— on, sending to ${s.phone}`) : `— off`;
+    ? `— on, ${s.call ? "WhatsApp + phone call" : "WhatsApp"} to ${s.phone}` : `— off`;
   const urgent = `${s.urgent_now} urgent facilit${s.urgent_now === 1 ? "y" : "ies"} right now.`;
   $("#alert-explain").textContent = on
     ? `${urgent} Checked automatically every ${s.check_interval_min} min and after each data refresh; you only get a message when a facility newly becomes urgent.`
     : `${urgent} Get a WhatsApp message when a facility in this LGA becomes HIGH priority, with a link straight to it. Only the number you save here is used.`;
   if (!s.whatsapp_configured) $("#alert-explain").textContent += " (WhatsApp is not configured on the server, so messages will fail.)";
-  // Before subscribing, and whenever a send was refused, show the "message us first" step.
-  const showOptIn = s.opt_in_link && (!on || s.needs_opt_in);
-  $("#alert-optin").hidden = !showOptIn;
-  if (showOptIn) {
-    $("#optin-link").href = s.opt_in_link;
-    $("#optin-title").textContent = on
-      ? "Your last alert was blocked: send us one WhatsApp message, then press Check now."
-      : `Step 1: send one WhatsApp message to ${s.business_number}.`;
-  }
   $("#alert-log").innerHTML = (s.log || []).slice(0, 5).map((l) => {
-    const what = l.ok ? `sent${l.via === "template" ? " (template)" : ""}`
-      : l.window_closed ? "blocked: you have not messaged us in 24 hours" : `failed (${PT.esc(l.reason || "")})`;
+    const what = l.via === "call" ? (l.ok ? "phone call placed" : `call failed (${PT.esc(l.reason || "")})`)
+      : l.ok ? `WhatsApp sent${l.via === "template" ? " (template)" : ""}`
+      : `failed (${PT.esc(l.reason || "")})`;
     return `<li class="${l.ok ? "" : "bad"}">${PT.esc(new Date(l.at).toLocaleString("en-GB"))}: ${what}, ${l.count} facilit${l.count === 1 ? "y" : "ies"}</li>`;
   }).join("");
 }

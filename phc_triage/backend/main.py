@@ -24,7 +24,6 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,11 +31,9 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response, Streami
 from fastapi.staticfiles import StaticFiles
 
 import alerts
-import data_loader
+import calls
 import scoring
-import simulator
 import spec_pipeline
-import train
 import whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(message)s")
@@ -83,41 +80,23 @@ def _save_feedback(data: dict) -> None:
 def _model_version() -> str:
     """Saved with every status so a label can be traced to the model that raised the flag."""
     w = STATE["world"]
-    model_path = spec_pipeline.BUNDLE if STATE.get("spec") else DATA_DIR / "models.joblib"
+    model_path = spec_pipeline.BUNDLE
     stamp = pd.Timestamp(model_path.stat().st_mtime, unit="s").strftime("%Y%m%d-%H%M") if model_path.exists() else "unsaved"
     return f"{w.get('source', 'simulator')}-{w.get('seed')}-{stamp}"
 
 
 def _refresh_risk_table():
-    build = spec_pipeline.build_risk_table if STATE.get("spec") else scoring.build_risk_table
-    STATE["risk_table"] = build(STATE["world"], STATE["bundle"])
-    min_frac = spec_pipeline.CLUSTER_MIN_FRAC if STATE.get("spec") else 0.4
-    STATE["cluster_alerts"] = scoring.cluster_alerts(STATE["world"], STATE["risk_table"], min_frac)
+    STATE["risk_table"] = spec_pipeline.build_risk_table(STATE["world"], STATE["bundle"])
+    STATE["cluster_alerts"] = scoring.cluster_alerts(STATE["world"], STATE["risk_table"], spec_pipeline.CLUSTER_MIN_FRAC)
 
 
 def _bootstrap():
-    model_path = DATA_DIR / "models.joblib"
-    world_path = DATA_DIR / "train_world.joblib"
-    validation_path = DATA_DIR / "validation.json"
-    STATE["spec"] = spec_pipeline.available()
-    if STATE["spec"]:
-        logger.info("Loading the spec-built world (phc_triage/data/baseline) and models (phc_triage/models)")
-        STATE["world"], STATE["bundle"], STATE["validation"] = spec_pipeline.load()
-    elif model_path.exists() and world_path.exists() and validation_path.exists():
-        logger.info("Loading cached models + world + validation from data/")
-        STATE["bundle"] = joblib.load(model_path)
-        STATE["world"] = joblib.load(world_path)
-        STATE["validation"] = json.loads(validation_path.read_text())
-    else:
-        logger.info("No cached models found — training now (first boot only)")
-        result = train.run_training()
-        STATE["bundle"] = result["bundle"]
-        STATE["world"] = result["world"]
-        STATE["validation"] = result["validation"]
+    """Load the simulated baseline world (phc_triage/data/baseline) and the
+    trained models (phc_triage/models), then score every facility."""
+    STATE["world"], STATE["bundle"], STATE["validation"] = spec_pipeline.load()
     STATE["model_version"] = _model_version()
     _refresh_risk_table()
-    STATE["lga_phones"] = data_loader.lga_coordinator_phones(STATE["world"].get("seed", "A")) \
-        if data_loader.available() and not STATE["spec"] else {}
+    DATA_DIR.mkdir(exist_ok=True)
     if not FEEDBACK_PATH.exists():
         _save_feedback({})
     logger.info("PHC Triage ready — %d facilities, %d LGAs", len(STATE["world"]["facilities"]), len(STATE["world"]["lgas"]))
@@ -488,10 +467,9 @@ async def send_officer_brief(lga: str, body: dict | None = None):
     capacity = int(body.get("capacity") or 12)
     data = await officer_list(lga, capacity)
     text = _weekly_brief_template(lga, data["cards"], data["warning_banners"])
-    sample_hint = STATE.get("lga_phones", {}).get(lga)
     to = body.get("to")
     if not to:
-        return {"lga": lga, "text": text, "sent": False, "dry_run": True, "sample_contact_hint": sample_hint,
+        return {"lga": lga, "text": text, "sent": False, "dry_run": True,
                 "reason": "No real recipient number given — this is a preview, not configured to text a fabricated sample number."}
     result = await whatsapp.send_text(to, text)
     return {"lga": lga, "to": to, "text": text, "sent": result["ok"], "dry_run": False, **result}
@@ -565,14 +543,31 @@ async def alert_status(lga: str):
 
 @app.post("/api/alerts/{lga}/subscribe")
 async def alert_subscribe(lga: str, body: dict):
-    """Save the officer's own WhatsApp number and send the first alert now."""
+    """Save the officer's own number and send the first alert now.
+    call=true also phones them (BimpeAI) whenever a facility becomes urgent."""
     _known_lga(lga)
     phone = alerts.clean_phone(str(body.get("phone") or ""))
     if not phone:
-        raise HTTPException(400, "Enter the number with country code, digits only, e.g. 2348012345678.")
-    alerts.save_contact(lga, phone)
+        raise HTTPException(400, "Enter a phone number, e.g. 08012345678 or 2348012345678.")
+    alerts.save_contact(lga, phone, call=bool(body.get("call")))
     result = await alerts.run_check(lga, _urgent_cards(lga))
     return {**alerts.status(lga), "check": result}
+
+
+@app.post("/api/facility/{facility_id}/call")
+async def call_facility(facility_id: str, body: dict):
+    """Phone a facility in-charge (or anyone the officer names) with a reminder
+    or a fridge check. Like the WhatsApp path, only an explicit number is dialled."""
+    kind = body.get("kind")
+    if kind not in ("reminder", "confirmation"):
+        raise HTTPException(400, "kind must be reminder or confirmation")
+    r = _risk_row(facility_id)
+    if kind == "reminder" and int(r["months_since_last_report"]) == 0:
+        raise HTTPException(409, "This facility reported on time this month — a reminder would be factually wrong.")
+    message, facts = calls.facility_message(kind, r["name"], r.to_dict())
+    if not body.get("to"):
+        return {"ok": False, "dry_run": True, "message": message}
+    return {**await calls.place_call(str(body["to"]), message, facts), "message": message}
 
 
 @app.post("/api/alerts/{lga}/unsubscribe")
@@ -659,12 +654,9 @@ async def _incoming_reply(sender: str, text: str) -> str | None:
 
 @app.post("/api/admin/retrain")
 async def retrain():
-    """Regenerate the world and retrain all three models from scratch."""
-    result = train.run_training()
-    STATE["bundle"] = result["bundle"]
-    STATE["world"] = result["world"]
-    STATE["validation"] = result["validation"]
-    _refresh_risk_table()
+    """Reload the world and models from disk after an offline retrain
+    (python -m ml.train), rescore, and alert on anything newly urgent."""
+    _bootstrap()
     await _check_all_alerts()
     return {"ok": True}
 

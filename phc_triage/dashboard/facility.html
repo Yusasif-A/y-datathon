@@ -49,11 +49,13 @@
   </div>
 
   <div class="panel no-print">
-    <h2>WhatsApp to the facility <span class="faint">— mock-up: sent only after you review it here, never automatic</span></h2>
+    <h2>Contact the facility <span class="faint">— WhatsApp or a phone call; sent only when you choose, never automatic</span></h2>
     <p class="faint" id="wa-contact" style="margin-top:0"></p>
     <div id="wa-btns" style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn sm" data-kind="reminder">Send report reminder</button>
       <button class="btn sm" data-kind="confirmation">Send fridge check (YES/NO)</button>
+      <button class="btn sm" data-kind="reminder" data-via="call">📞 Call: report reminder</button>
+      <button class="btn sm" data-kind="confirmation" data-via="call">📞 Call: fridge check</button>
     </div>
   </div>
 </main>
@@ -122,11 +124,10 @@ async function boot() {
   $("#wa-contact").textContent = ch.phone_sample
     ? `Sample contact on file: ${ch.phone_sample} (${ch.whatsapp_opt_in ? "opted in" : "not opted in"}) — not auto-used, you choose the real number when sending.`
     : "No sample contact on file for this facility.";
-  const reminderBtn = document.querySelector('[data-kind="reminder"]');
-  if (reminderBtn && d.months_since_last_report === 0) {
-    reminderBtn.disabled = true;
-    reminderBtn.title = "Reported on time this month — a reminder would be factually wrong.";
-  }
+  if (d.months_since_last_report === 0) document.querySelectorAll('[data-kind="reminder"]').forEach((b) => {
+    b.disabled = true;
+    b.title = "Reported on time this month — a reminder would be factually wrong.";
+  });
 
   $("#btns").innerHTML = PT.statusControlHtml(d);
   $("#btns").dataset.fid = fid;
@@ -157,13 +158,22 @@ async function boot() {
 
   $("#wa-btns").querySelectorAll("button").forEach((b) => { b.onclick = async () => {
     const hint = ch.phone_sample ? ` (sample contact on file: ${ch.phone_sample} — not auto-used)` : "";
-    const to = prompt(`Facility in-charge's WhatsApp number, with country code${hint}. Leave blank to just preview.`, "");
-    if (!to) { PT.toast("Preview only — message is ready, nothing was sent."); return; }
+    const call = b.dataset.via === "call";
+    const to = prompt(call
+      ? `Phone number to call for the in-charge, e.g. 08012345678${hint}. Leave blank to cancel.`
+      : `Facility in-charge's WhatsApp number, with country code${hint}. Leave blank to just preview.`, "");
+    if (!to) { PT.toast(call ? "No call placed." : "Preview only — message is ready, nothing was sent."); return; }
     b.disabled = true;
     try {
-      const res = await PT.api(`/api/facility/${encodeURIComponent(fid)}/send_whatsapp`, { method: "POST", body: { kind: b.dataset.kind, to } });
-      if (res.sent) PT.toast(`Sent to ${res.to}`);
-      else PT.toast(`Not sent: ${res.reason || "unknown error"}`);
+      if (call) {
+        PT.toast("Calling…");
+        const res = await PT.api(`/api/facility/${encodeURIComponent(fid)}/call`, { method: "POST", body: { kind: b.dataset.kind, to } });
+        PT.toast(res.ok ? "Call placed. The phone should ring shortly." : `Call failed: ${res.reason || "unknown error"}`);
+      } else {
+        const res = await PT.api(`/api/facility/${encodeURIComponent(fid)}/send_whatsapp`, { method: "POST", body: { kind: b.dataset.kind, to } });
+        if (res.sent) PT.toast(`Sent to ${res.to}`);
+        else PT.toast(`Not sent: ${res.reason || "unknown error"}`);
+      }
     } catch (e) { PT.toast(e.message); }
     b.disabled = false;
   }; });

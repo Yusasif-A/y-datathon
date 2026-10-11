@@ -1,20 +1,20 @@
 # PHC Triage — backend + dashboard
 
-Implements the solution doc: a synthetic-DHIS2 simulator, three risk models
+Idon-Lafia's engine: a synthetic-DHIS2 simulator, three risk models
 (expected-report gap, silence-type classifier, calibrated trouble forecast),
-priority ranking, and a dashboard (officer list / facility page / state
-overview) with the Confirmed / Cleared / Just late feedback loop.
+priority ranking, a dashboard (officer list / facility page / state
+overview) with the officer feedback loop, and urgent alerts to officers by
+WhatsApp and BimpeAI phone call. See `../project-SUMMARY.md` for the overview.
 
 Everything here is **synthetic data**, clearly labelled. No DHIS2 connection
 exists in this build — by design, per the doc's "we read, we never write"
 rule for DHIS2.
 
-## Spec-built pipeline (Simulator Specification v0.2)
+## Data and models
 
-The dataset and models are rebuilt to follow `PHC_Triage_Simulator_Spec`,
-on **real facility locations**. When `models/bundle.joblib` and
-`data/baseline/` exist, the backend serves this pipeline; otherwise it falls
-back to the original `stimulate-data` path described further down.
+The dataset is simulated on **real facility locations**. The backend serves `data/baseline/` with the
+trained models in `models/bundle.joblib`; both are committed, so the
+dashboard runs without regenerating anything.
 
 ```bash
 cd phc_triage
@@ -59,47 +59,34 @@ Decisions that depart from the spec (each is noted where it is set):
   weak and remote facilities more often. ACT stockouts now last ~3 months and
   continue month to month 70% of the time.
 
-## Run it (original stimulate-data pipeline)
+## Run it
 
 ```bash
 cd phc_triage/backend
 pip install -r requirements.txt
-python main.py        # first boot trains the models (~1 min), then caches to data/
+python main.py        # API + dashboard on http://localhost:5005/
 ```
 
-Open http://localhost:5005/ — the backend also serves the dashboard
-(`phc_triage/dashboard/`) as static files, so there's nothing else to start.
+The backend also serves the dashboard (`phc_triage/dashboard/`) as static
+files, so there's nothing else to start. To expose it publicly and redeploy
+the Firebase dashboard, run `start_tunnel.ps1` from the repo root.
 
-To force a clean retrain (new simulated world): delete `backend/data/*.joblib`
-and `validation.json`, or POST to `/api/admin/retrain`.
+WhatsApp and calls read the root `.env`: `WHATSAPP_TOKEN`,
+`WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `PUBLIC_WHATSAPP_NUMBER`
+and `BIMPEAI_API_KEY`. Without them the dashboard still works; sends report
+"not configured".
 
-## Layout
+## Backend layout
 
-- `backend/simulator.py` — builds the fake state: facilities, 24 months of
-  hidden truth (stock, staffing, fridges, closures), and the messy DHIS2-style
-  reports that truth produces.
-- `backend/features.py` — turns a world into a leak-free feature table
-  (only past months ever feed a given month's features) plus the hidden
-  labels used only for training/grading.
-- `backend/train.py` — trains the three models and the validation numbers
-  (precision@k vs the "silent 2 months" baseline, calibration, a stress test
-  on a different fake world, rural vs urban fairness).
-- `backend/scoring.py` — turns trained models + a world into the ranked,
-  explained risk table the dashboard reads (priority = trouble chance x
-  people affected, SHAP-grouped reasons, plain-language sentence, suggested
-  action).
 - `backend/main.py` — the FastAPI app: officer list, facility detail, state
-  overview, feedback loop, CSV/printable export, weekly brief text.
-- `dashboard/` — the three views from section 7 of the doc, plain HTML/CSS/JS,
-  no build step.
-
-## What's real vs mocked here
-
-Built: simulator, all three models, ranking, officer list, facility page,
-state overview, Confirmed/Cleared/Just late + mark visited + override, CSV
-export, printable list, weekly brief (template), validation numbers.
-
-Not built (per the doc, mock-up only): WhatsApp delivery, the facility
-in-charge view, live SMS confirmation. `/api/weekly_brief` returns the exact
-text a WhatsApp message would carry — wiring an actual WhatsApp Business
-account to send it is the only missing piece for that path.
+  overview, feedback loop, CSV/printable export, weekly brief, alert and
+  call endpoints, and the `/whatsapp` webhook.
+- `backend/spec_pipeline.py` — scores the baseline world with the trained
+  models into the ranked, explained risk table the dashboard reads.
+- `backend/scoring.py` — shared wording: reasons, suggested actions, LGA
+  cluster alerts.
+- `backend/alerts.py` — automatic urgent alerts: who to notify, what is
+  newly urgent, the send log.
+- `backend/whatsapp.py` — WhatsApp Business Cloud API sender.
+- `backend/calls.py` — BimpeAI phone calls that speak the alert.
+- `dashboard/` — plain HTML/CSS/JS, no build step.

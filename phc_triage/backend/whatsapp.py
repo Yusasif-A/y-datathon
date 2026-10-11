@@ -1,13 +1,7 @@
 """
-Thin WhatsApp sender for PHC Triage, reusing the SAME WhatsApp Business
-account already configured for this repo's other project (the root
-`.env` — WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_GRAPH_VERSION).
-
-This is deliberately standalone rather than importing the sibling app.py:
-that module pulls in a lot of unrelated machinery (DHIS2-unrelated intake,
-vision, translation services) and calls SystemExit if some of ITS env vars
-are missing. PHC Triage only needs one thing from the WhatsApp Business API
-— send a plain text message — so it talks to the Graph API directly.
+Thin WhatsApp sender for PHC Triage, talking to the WhatsApp Business
+Cloud API directly. Credentials come from the root `.env`
+(WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_GRAPH_VERSION).
 
 Per the solution doc, WhatsApp here is a delivery channel only: it carries
 the weekly brief (and, as mock-ups, facility reminder/confirmation text) and
@@ -29,7 +23,7 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger("phc-triage.whatsapp")
 
-# The credentials live in the sibling ComNote project's .env at the repo root.
+# The credentials live in the .env at the repo root.
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")

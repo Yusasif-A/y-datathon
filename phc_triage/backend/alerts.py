@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 import pandas as pd
 
+import calls
 import whatsapp
 
 logger = logging.getLogger("phc-triage.alerts")
@@ -48,6 +49,8 @@ def _write(path: Path, data: dict) -> None:
 
 def clean_phone(raw: str) -> str | None:
     digits = re.sub(r"[\s\-()+]", "", raw or "")
+    if re.fullmatch(r"0\d{10}", digits):  # Nigerian local format, 0813...
+        digits = "234" + digits[1:]
     return digits if re.fullmatch(r"\d{10,15}", digits) else None
 
 
@@ -63,9 +66,9 @@ def subscribed_lgas() -> list:
     return [lga for lga, c in _read(CONTACTS_PATH).items() if c.get("enabled")]
 
 
-def save_contact(lga: str, phone: str) -> None:
+def save_contact(lga: str, phone: str, call: bool = False) -> None:
     contacts = _read(CONTACTS_PATH)
-    contacts[lga] = {"phone": phone, "enabled": True, "saved_at": pd.Timestamp.utcnow().isoformat()}
+    contacts[lga] = {"phone": phone, "enabled": True, "call": call, "saved_at": pd.Timestamp.utcnow().isoformat()}
     _write(CONTACTS_PATH, contacts)
     # A new number starts fresh, so its first check lists everything urgent now.
     state = _read(STATE_PATH)
@@ -108,7 +111,8 @@ def status(lga: str) -> dict:
     s = _read(STATE_PATH).get(lga, {})
     return {
         "lga": lga, "subscribed": bool(c and c.get("enabled")),
-        "phone": mask(c["phone"]) if c else None,
+        "phone": mask(c["phone"]) if c else None, "call": bool(c and c.get("call")),
+        "calls_configured": calls.configured(), "calls_live": calls.LIVE,
         "last_check": s.get("last_check"), "log": list(reversed(s.get("log", [])))[:10],
         "needs_opt_in": bool(s.get("needs_opt_in")), "opt_in_link": opt_in_link(lga),
         "business_number": whatsapp.BUSINESS_NUMBER or None, "template_configured": bool(whatsapp.ALERT_TEMPLATE),
@@ -164,7 +168,15 @@ async def run_check(lga: str, urgent: list, force: bool = False) -> dict:
                                         "count": len(new), "ok": sent["ok"], "via": via,
                                         "window_closed": s["needs_opt_in"], "reason": sent.get("reason")})
         s["log"] = s["log"][-LOG_KEEP:]
-        if sent["ok"]:
+        if c.get("call"):
+            # A phone call too: it reaches officers with no data, and ignores the 24-hour rule.
+            message, facts = calls.officer_message(lga, new, len(urgent))
+            rang = await calls.place_call(c["phone"], message, facts)
+            result.update(called=rang["ok"], call_reason=rang.get("reason"))
+            s["log"].append({"at": now, "facilities": [u["facility_id"] for u in new[:MAX_LISTED]],
+                             "count": len(new), "ok": rang["ok"], "via": "call", "reason": rang.get("reason")})
+            s["log"] = s["log"][-LOG_KEEP:]
+        if sent["ok"] or result.get("called"):
             # Only facilities that are still urgent stay "notified"; the rest can re-alert later.
             s["notified"] = [u["facility_id"] for u in urgent]
             s["fresh"] = False

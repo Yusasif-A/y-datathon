@@ -1,7 +1,7 @@
 """
-Turns trained models + a world into the thing the officer actually sees:
-one ranked row per facility, with a plain-language reason, a suggested
-action and a SHAP-based "why it's flagged" breakdown.
+Shared wording and rules for the risk table spec_pipeline.py builds: the
+plain-language reason, the suggested action per silence cause, and the
+LGA-wide cluster alerts.
 
 Priority = chance of trouble x people affected, exactly as the doc specifies.
 Thin/missing data never lowers a facility's rank — a facility with lots of
@@ -13,10 +13,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import shap
-
-import features
-from train import predict_trouble
 
 ACTIONS = {
     "lga_wide": "Send one note to the LGA data office, not separate visits to each facility.",
@@ -127,103 +123,6 @@ def _suggested_action(row) -> str:
             return FORECAST_ACTIONS.get(row["top_factor"], ACTIONS["sudden_drop"])
         return ACTIONS["none"]
     return ACTIONS.get(cause, ACTIONS["none"])
-
-
-def build_risk_table(world: dict, bundle: dict, as_of_month: int | None = None) -> pd.DataFrame:
-    panel = features.build_panel(world)
-    if as_of_month is None:
-        as_of_month = world["months"] - 1
-    snap = panel[panel["month_idx"] == as_of_month].copy()
-
-    cols = bundle["trouble_cols"]
-    p_main, p_ens, p_unc = predict_trouble(bundle["trouble_model"], bundle["trouble_ensemble"], cols, snap)
-    snap["trouble_prob"] = p_main
-    snap["trouble_uncertainty"] = p_unc
-
-    # Silence-type model (only meaningful once a facility has missed at least
-    # one month — a facility that reported this month has nothing to classify).
-    s_cols = bundle["silence_cols"]
-    s_cats = bundle["silence_cats"]
-    quiet_mask = snap["months_since_last_report"] >= 1
-    snap["pred_cause"] = "none"
-    if quiet_mask.any():
-        proba = bundle["silence_model"].predict(snap.loc[quiet_mask, s_cols])
-        snap.loc[quiet_mask, "pred_cause"] = [s_cats[int(c)] for c in proba]
-        # A facility that IS silent can't be labelled "none" (no concern) —
-        # that class only means "no identifiable cause found", which for an
-        # actual gap defaults to the mildest, least alarming category.
-        snap.loc[quiet_mask & (snap["pred_cause"] == "none"), "pred_cause"] = "late_entry"
-
-    # Expected-report gap.
-    e_cols = bundle["expected_cols"]
-    snap["expected_service_total"] = bundle["expected_model"].predict(snap[e_cols])
-    snap["report_gap"] = np.where(
-        snap["reported"], 0.0,
-        np.clip(snap["expected_service_total"] / snap["expected_service_total"].clip(lower=1).mean(), 0, 3),
-    )
-
-    snap["impact_score"] = _impact_score(snap)
-    snap["priority"] = snap["trouble_prob"] * snap["impact_score"]
-
-    # SHAP explanation on the main calibrated trouble model's base estimator
-    # when available; otherwise fall back to the first ensemble member (both
-    # are plain LightGBM trees, so TreeExplainer works either way).
-    try:
-        base_est = bundle["trouble_model"].calibrated_classifiers_[0].estimator
-        explainer = shap.TreeExplainer(base_est)
-        shap_values = explainer.shap_values(snap[cols])
-        if isinstance(shap_values, list):
-            shap_values = shap_values[1]
-    except Exception:
-        explainer = shap.TreeExplainer(bundle["trouble_ensemble"][0])
-        shap_values = explainer.shap_values(snap[cols])
-        if isinstance(shap_values, list):
-            shap_values = shap_values[1]
-
-    shap_df = pd.DataFrame(shap_values, columns=cols, index=snap.index)
-    group_shap = pd.DataFrame(index=snap.index)
-    for col, grp in FEATURE_GROUP.items():
-        if col in shap_df.columns:
-            group_shap[grp] = group_shap.get(grp, 0) + shap_df[col]
-    snap["reason_breakdown"] = [
-        sorted(({"group": g, "impact": round(float(v), 4)} for g, v in row.items()),
-              key=lambda x: -abs(x["impact"]))
-        for _, row in group_shap.iterrows()
-    ]
-    top_group = group_shap.idxmax(axis=1)
-    snap["top_factor"] = top_group.where(group_shap.max(axis=1) > 0, "")
-
-    # Thin history is never read as "fine": the score stands, but it is tagged
-    # low confidence so the officer knows, and capped in the officer list.
-    reports = world["reports"]
-    history = (reports[reports["month_idx"] <= as_of_month]
-               .groupby("facility_id")["reported"].sum().rename("history_months"))
-    snap = snap.merge(history, on="facility_id", how="left")
-    snap["history_months"] = snap["history_months"].fillna(0).astype(int)
-    snap["low_confidence"] = snap["history_months"] < LOW_CONFIDENCE_MONTHS
-
-    snap["tag"] = pd.cut(snap["priority"], bins=[-1, snap["priority"].quantile(0.6),
-                                                 snap["priority"].quantile(0.88), 2],
-                        labels=["LOW", "MEDIUM", "HIGH"])
-    snap["reason"] = snap.apply(_reason_sentence, axis=1)
-    snap["suggested_action"] = snap.apply(_suggested_action, axis=1)
-    snap["silence_label"] = snap["pred_cause"].map(SILENCE_LABEL).fillna("reporting normally")
-
-    name_cols = ["facility_id", "name", "lga", "state", "lat", "lon", "population", "urban",
-                "power_reliability", "connectivity", "staff_count", "staff_standard", "distance_km",
-                "insecurity"]
-    optional_cols = [c for c in ("in_charge_phone_sample", "whatsapp_opt_in") if c in world["facilities"].columns]
-    name_cols = name_cols + optional_cols
-    out = snap.merge(world["facilities"][name_cols], on="facility_id", suffixes=("", "_fac"))
-    keep = name_cols + [
-        "reported", "months_since_last_report", "reported_rate_12m", "on_time_rate_6m",
-        "trouble_prob", "trouble_uncertainty", "pred_cause", "silence_label", "impact_score",
-        "priority", "tag", "reason", "suggested_action", "reason_breakdown", "expected_service_total",
-        "service_total", "month", "month_idx", "top_factor", "history_months", "low_confidence",
-    ]
-    out = out[[c for c in keep if c in out.columns]].sort_values("priority", ascending=False).reset_index(drop=True)
-    out["rank"] = np.arange(1, len(out) + 1)
-    return out
 
 
 def cluster_alerts(world: dict, risk_table: pd.DataFrame, min_frac: float = 0.4) -> list:

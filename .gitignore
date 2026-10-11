@@ -4,10 +4,9 @@ __pycache__/
 *.log
 phc_triage/backend/data/feedback.json
 
-# PHC Triage simulator outputs: large, rebuilt exactly by phc_triage/generate_all.py
 phc_triage/data/**/*.csv
 !phc_triage/data/worlds_summary.csv
-# ...except what the dashboard needs to serve the new model (model-visible files only, no truth)
+
 !phc_triage/data/baseline/facilities.csv
 !phc_triage/data/baseline/reports.csv
 !phc_triage/data/baseline/stock_reports.csv
@@ -17,3 +16,10 @@ phc_triage/backend/data/alert_state.json
 .firebase/
 .vscode/
 .wrangler/
+phc_triage/backend/data/bimpe_agent.json
+
+PHC Triage + Pulse Merged Solution Document (1).md
+PHC_Triage_Solution_Document_v2.md
+PHC_Triage_Simulator_Spec.docx
+idon-lafia-video-script.md
+project-SUMMARY.md

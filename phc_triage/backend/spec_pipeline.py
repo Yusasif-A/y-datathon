@@ -4,8 +4,7 @@ simulated reporting) and the models trained by phc_triage/ml to the
 dashboard, in the same risk-table shape scoring.py produces, so main.py and
 the dashboard need no other changes. ALL OUTCOME DATA IS SYNTHETIC.
 
-Used when phc_triage/models/bundle.joblib and phc_triage/data/baseline exist;
-otherwise main.py falls back to the original stimulate-data pipeline.
+Needs phc_triage/models/bundle.joblib and phc_triage/data/baseline.
 """
 
 from __future__ import annotations

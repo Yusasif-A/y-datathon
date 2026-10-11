@@ -12,3 +12,4 @@ pyarrow
 pyyaml
 openpyxl
 scipy
+bimpeai
