@@ -19,7 +19,7 @@ Nigeria has about **31,000 primary health centres**, most people's first contact
 
 | | |
 |---|---|
-| 🎬 **Demo video** | [Watch the demo](VIDEO_LINK_HERE) |
+| 🎬 **Demo video** | [Watch the demo](VIDEO_LINK_HERE). The raw screen recording is [`idon-lafia.mp4`](idon-lafia.mp4) |
 | 📄 **Project summary** (2 pages) | [`project-SUMMARY.pdf`](project-SUMMARY.pdf) |
 | 🌐 **Live dashboard** | [idon-lafiya.web.app](https://idon-lafiya.web.app) (needs the backend running, see [Run it](#run-it)) |
 | 📊 **Validation results** | [`phc_triage/reports/validation.md`](phc_triage/reports/validation.md) |
@@ -39,6 +39,7 @@ The model is fair across rural and urban facilities (83% vs 82%) and holds about
 .
 ├── README.md                       ← you are here
 ├── project-SUMMARY.pdf             2-page summary: problem, approach, features
+├── idon-lafia.mp4                  demo screen recording
 ├── start_tunnel.ps1                public tunnel + redeploy dashboard (Windows)
 ├── firebase.json, .firebaserc      Firebase Hosting config for the dashboard
 └── phc_triage/
