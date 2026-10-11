@@ -19,7 +19,7 @@ Nigeria has about **31,000 primary health centres**, most people's first contact
 
 | | |
 |---|---|
-| 🎬 **Demo video** | [Watch the demo](VIDEO_LINK_HERE). The raw screen recording is [`idon-lafia.mp4`](idon-lafia.mp4) |
+| 🎬 **Demo video** | [idon-lafiya.web.app/demo](https://idon-lafiya.web.app/demo) |
 | 📄 **Project summary** (2 pages) | [`project-SUMMARY.pdf`](project-SUMMARY.pdf) |
 | 🌐 **Live dashboard** | [idon-lafiya.web.app](https://idon-lafiya.web.app) (needs the backend running, see [Run it](#run-it)) |
 | 📊 **Validation results** | [`phc_triage/reports/validation.md`](phc_triage/reports/validation.md) |
