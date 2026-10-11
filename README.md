@@ -39,7 +39,6 @@ The model is fair across rural and urban facilities (83% vs 82%) and holds about
 .
 ├── README.md                       ← you are here
 ├── project-SUMMARY.pdf             2-page summary: problem, approach, features
-├── idon-lafia.mp4                  demo screen recording
 ├── start_tunnel.ps1                public tunnel + redeploy dashboard (Windows)
 ├── firebase.json, .firebaserc      Firebase Hosting config for the dashboard
 └── phc_triage/
